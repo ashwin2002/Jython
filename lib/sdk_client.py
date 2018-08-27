@@ -643,6 +643,10 @@ class SDKClient(object):
         builder = mutateIn.remove(path, sub_doc)
         builder.execute()
 
+    def insert_json_documents(self, key_prefix, documents):
+        for index, data in enumerate(documents):
+            self.cb.insert(JsonDocument.create(key_prefix+str(index), JsonObject.fromJson(data)))
+
 class SDKSmartClient(object):
     def __init__(self, rest, bucket, info = None, compression=True):
         self.rest = rest

@@ -26,7 +26,7 @@ class CBASHelper(RestConnection):
     
     def execute_statement_on_cbas(self, statement, mode, pretty=True,
                                   timeout=70, client_context_id=None,
-                                  username=None, password=None,analytics_timeout=120):
+                                  username=None, password=None,analytics_timeout=120, time_out_unit="s"):
         if not username:
             username = self.username
         if not password:
@@ -35,7 +35,7 @@ class CBASHelper(RestConnection):
         headers = self._create_capi_headers(username, password)
 
         params = {'statement': statement, 'mode': mode, 'pretty': pretty,
-                  'client_context_id': client_context_id, 'timeout':str(analytics_timeout)+"s"}
+                  'client_context_id': client_context_id, 'timeout': str(analytics_timeout) + time_out_unit}
         params = json.dumps(params)
         status, content, header = self._http_request(api, 'POST',
                                                      headers=headers,
@@ -56,6 +56,37 @@ class CBASHelper(RestConnection):
         else:
             log.error("/analytics/service status:{0},content:{1}".format(
                 status, content))
+            raise Exception("Analytics Service API failed")
+
+    def execute_parameter_statement_on_cbas(self, statement, mode, pretty=True, timeout=70, client_context_id=None,
+                                            username=None, password=None, analytics_timeout=120, parameters=[]):
+        if not username:
+            username = self.username
+        if not password:
+            password = self.password
+        api = self.cbas_base_url + "/analytics/service"
+        headers = self._create_capi_headers(username, password)
+        params = {'statement': statement, 'mode': mode, 'pretty': pretty, 'client_context_id': client_context_id,
+                  'timeout': str(analytics_timeout) + "s"}
+        for i in range(len(parameters)):
+            params.update(parameters[i])
+        params = json.dumps(params)
+        status, content, header = self._http_request(api, 'POST', headers=headers, params=params, timeout=timeout)
+        # print("cbas response:{}".format(content))
+        if status:
+            return content
+        elif str(header['status']) == '503':
+            log.info("Request Rejected")
+            raise Exception("Request Rejected")
+        elif str(header['status']) in ['500', '400']:
+            json_content = json.loads(content)
+            msg = json_content['errors'][0]['msg']
+            if "Job requirement" in msg and "exceeds capacity" in msg:
+                raise Exception("Capacity cannot meet job requirement")
+            else:
+                return content
+        else:
+            log.error("/analytics/service status:{0},content:{1}".format(status, content))
             raise Exception("Analytics Service API failed")
 
     def delete_active_request_on_cbas(self, payload, username=None, password=None):
@@ -228,7 +259,49 @@ class CBASHelper(RestConnection):
         if not password:
             password = self.password
         headers = self._create_capi_headers(username, password)
-        cbas_base_url = "http://{0}:{1}".format(self.ip, 8095)
-        api = cbas_base_url + "/analytics/buckets"
+        api = self.cbas_base_url + "/analytics/buckets"
         status, content, response = self._http_request(api, method=method, headers=headers)
         return status, content, response
+
+    def fetch_pending_mutation_on_cbas_node(self, node_ip, port=9110, method="GET", username="None", password="None"):
+        if not username:
+            username = self.username
+        if not password:
+            password = self.password
+        headers = self._create_capi_headers(username, password)
+        node_url = "http://{0}:{1}".format(node_ip, port)
+        api = node_url + "/analytics/node/stats"
+        status, content, response = self._http_request(api, method=method, headers=headers)
+        return status, content, response
+
+    def fetch_pending_mutation_on_cbas_cluster(self, port=9110, method="GET", username="None", password="None"):
+        if not username:
+            username = self.username
+        if not password:
+            password = self.password
+        headers = self._create_capi_headers(username, password)
+        node_url = "http://{0}:{1}".format(self.ip, port)
+        api = node_url + "/analytics/node/agg/stats/remaining"
+        status, content, response = self._http_request(api, method=method, headers=headers)
+        return status, content, response
+    
+    def fetch_dcp_state_on_cbas(self, dataset,  method="GET", dataverse="Default", username=None, password=None):
+        if not username:
+            username = self.username
+        if not password:
+            password = self.password
+        headers = self._create_capi_headers(username, password)
+        api = self.cbas_base_url + "/analytics/dataset/dcp/{0}/{1}".format(dataverse, dataset)
+        status, content, response = self._http_request(api, method=method, headers=headers)
+        return status, content, response
+
+    # return analytics diagnostics info
+    def get_analytics_diagnostics(self, cbas_node, timeout=120):
+        analyticsBaseUrl = "http://{0}:{1}/".format(cbas_node.ip, 8095)
+        api = analyticsBaseUrl + 'analytics/node/diagnostics'
+        status, content, header = self._http_request(api, timeout=timeout)
+        if status:
+            json_parsed = json.loads(content)
+            return json_parsed
+        else:
+            raise Exception("Unable to get jre path from analytics")

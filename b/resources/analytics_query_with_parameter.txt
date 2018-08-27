@@ -1,0 +1,52 @@
+SELECT * FROM %s where country = ? limit ?&args=["United States",2]#validate
+SELECT * FROM %s where country = $1 limit $2&args=["United States",2]#validate
+SELECT * FROM %s where country = $country limit $li&$country="United States"&$li=2#validate
+SELECT * FROM %s where country = ? and iata= ?&args=["United States","FL"]#validate
+SELECT * FROM %s where country = $1 and iata= $2&args=["United States","FL"]#validate
+SELECT * FROM %s where country = $country and iata= $iata&$country="United States"&$iata="FL"#validate
+SELECT sourceairport, destinationairport, ROUND(distance) AS DistanceInMiles, ROUND(distance)*5280 AS DistanceInFeet FROM %s WHERE `type`=? ORDER BY distance DESC LIMIT ?&args=["route",2]
+SELECT sourceairport, destinationairport, ROUND(distance) AS DistanceInMiles, ROUND(distance)*5280 AS DistanceInFeet FROM %s WHERE `type`=$1 ORDER BY distance DESC LIMIT $2&args=["route",2]
+SELECT sourceairport, destinationairport, ROUND(distance) AS DistanceInMiles, ROUND(distance)*5280 AS DistanceInFeet FROM %s WHERE `type`=$ty ORDER BY distance DESC LIMIT $li&$ty="route"&$li=2
+SELECT AVG(geo.alt) AS AverageAltitude FROM %s WHERE `type`=?&args=["airport"]#validate
+SELECT AVG(geo.alt) AS AverageAltitude FROM %s WHERE `type`=$1&args=["airport"]#validate
+SELECT AVG(geo.alt) AS AverageAltitude FROM %s WHERE `type`=$ty&$ty="airport"#validate
+SELECT MIN(name) AS MinName FROM %s WHERE `type`=?&args=["airport"]#validate
+SELECT MIN(name) AS MinName FROM %s WHERE `type`=$1&args=["airport"]#validate
+SELECT MIN(name) AS MinName FROM %s WHERE `type`=$ty&$ty="airport"#validate
+SELECT MIN(geo.lat) AS MinLatitude FROM %s WHERE `type`=?&args=["airport"]#validate
+SELECT MIN(geo.lat) AS MinLatitude FROM %s WHERE `type`=$1&args=["airport"]#validate
+SELECT MIN(geo.lat) AS MinLatitude FROM %s WHERE `type`=$ty&$ty="airport"#validate
+SELECT MAX(UPPER(name)) AS MaxName FROM %s WHERE `type`=?&args=["airport"]#validate
+SELECT MAX(UPPER(name)) AS MaxName FROM %s WHERE `type`=$1&args=["airport"]#validate
+SELECT MAX(UPPER(name)) AS MaxName FROM %s WHERE `type`=$ty&$ty="airport"#validate
+SELECT ARRAY_CONTAINS(t.public_likes, "Vallie Ryan") AS array_contains_value FROM %s t WHERE `type`=? LIMIT 1&args=["hotel"]#validate
+SELECT ARRAY_CONTAINS(t.public_likes, "Vallie Ryan") AS array_contains_value FROM %s t WHERE `type`=$1 LIMIT 1&args=["hotel"]#validate
+SELECT ARRAY_CONTAINS(t.public_likes, "Vallie Ryan") AS array_contains_value FROM %s t WHERE `type`=$ty LIMIT 1&$ty="hotel"#validate
+SELECT ARRAY_DISTINCT([?,?,?,?,?,?,?]) AS distinct_fruits&args=["apples","bananas","grapes","oranges","apples","mangoes","bananas"]
+SELECT ARRAY_DISTINCT([$1,$2,$3,$4,$5,$6,$7]) AS distinct_fruits&args=["apples","bananas","grapes","oranges","apples","mangoes","bananas"]
+SELECT ARRAY_DISTINCT([$ap,$ba,$gr,$ap,$ba,$gr]) AS distinct_fruits&$ap="apples"&$ba="bananas"&$gr="grapes"
+SELECT ARRAY_REPEAT(?, 3) AS repeat_val&args=["apple"]
+SELECT ARRAY_REPEAT($1, 3) AS repeat_val&args=["apple"]
+SELECT ARRAY_REPEAT($ap, 3) AS repeat_val&$ap="apple"
+SELECT airline, sourceairport FROM  %s WHERE  `type` = "route" AND (SELECT raw count(*) FROM %s.schedule as s WHERE s.day = 1)[0]  > $1 LIMIT 3&args=[4]#validate
+SELECT airline, sourceairport FROM  %s WHERE  `type` = "route" AND (SELECT raw count(*) FROM %s.schedule as s WHERE s.day = 1)[0]  > ? LIMIT 3&args=[4]#validate
+SELECT airline, sourceairport FROM  %s WHERE  `type` = "route" AND (SELECT raw count(*) FROM %s.schedule as s WHERE s.day = 1)[0]  > $dy LIMIT 3&$dy=4#validate
+SELECT  id, sourceairport, destinationairport,(SELECT s.* FROM %s.schedule s WHERE s.utc > "22:00:00" ORDER BY s.utc)  after_10pm FROM %s WHERE `type` = ? and sourceairport = ? LIMIT 2&args=["route","SFO"]
+SELECT  id, sourceairport, destinationairport,(SELECT s.* FROM %s.schedule s WHERE s.utc > "22:00:00" ORDER BY s.utc)  after_10pm FROM %s WHERE `type` = $1 and sourceairport = $2 LIMIT 2&args=["route","SFO"]
+SELECT  id, sourceairport, destinationairport,(SELECT s.* FROM %s.schedule s WHERE s.utc > "22:00:00" ORDER BY s.utc)  after_10pm FROM %s WHERE `type` = $ty and sourceairport = $sa  LIMIT 2&$ty="route"&$sa="SFO"
+SELECT name, reviews[0].date FROM %s WHERE `type` = ? AND reviews[0].date BETWEEN ? AND ? limit 2&args=["hotel","2013-01-01 00:00:00 +0100","2014-01-01 00:00:00 +0100"]#validate
+SELECT name, reviews[0].date FROM %s WHERE `type` = $1 AND reviews[0].date BETWEEN $2 AND $3 limit 2&args=["hotel","2013-01-01 00:00:00 +0100","2014-01-01 00:00:00 +0100"]#validate
+SELECT name, reviews[0].date FROM %s WHERE `type` = $ty AND reviews[0].date BETWEEN $p1 AND $p2 limit 2&$ty="hotel"&$p1="2013-01-01 00:00:00 +0100"&$p2="2014-01-01 00:00:00 +0100"#validate
+SELECT city City, COUNT(DISTINCT name) LandmarkCount FROM %s WHERE `type` = ? GROUP BY city ORDER BY LandmarkCount DESC LIMIT 4&args=["landmark"]#validate
+SELECT city City, COUNT(DISTINCT name) LandmarkCount FROM %s WHERE `type` = $1 GROUP BY city ORDER BY LandmarkCount DESC LIMIT 4&args=["landmark"]#validate
+SELECT city City, COUNT(DISTINCT name) LandmarkCount FROM %s WHERE `type` = $ty GROUP BY city ORDER BY LandmarkCount DESC LIMIT 4&$ty="landmark"#validate
+SELECT city City, COUNT(DISTINCT name) LandmarkCount FROM %s WHERE `type` = ? GROUP BY city LETTING MinimumThingsToSee = ? HAVING COUNT(DISTINCT name) > MinimumThingsToSee&args=["landmark",400]
+SELECT city City, COUNT(DISTINCT name) LandmarkCount FROM %s WHERE `type` = $1 GROUP BY city LETTING MinimumThingsToSee = $2 HAVING COUNT(DISTINCT name) > MinimumThingsToSee&args=["landmark",400]
+SELECT city City, COUNT(DISTINCT name) LandmarkCount FROM %s WHERE `type` = $ty GROUP BY city LETTING MinimumThingsToSee = $ms HAVING COUNT(DISTINCT name) > MinimumThingsToSee&$ty="landmark"&$ms=400
+SELECT city City, COUNT(DISTINCT name) LandmarkCount FROM %s WHERE `type` = ? GROUP BY city HAVING city > ?&args=["landmark","S"]
+SELECT city City, COUNT(DISTINCT name) LandmarkCount FROM %s WHERE `type` = $1 GROUP BY city HAVING city > $2&args=["landmark","S"]
+SELECT city City, COUNT(DISTINCT name) LandmarkCount FROM %s WHERE `type` = $ty GROUP BY city HAVING city > $city&$ty="landmark"&$city="S"
+SELECT DISTINCT city FROM %s WHERE `type` = ? ORDER BY city LIMIT ? OFFSET ?&args=["airport",4,200]#validate
+SELECT callsign FROM %s GROUP BY callsign HAVING count(callsign) BETWEEN ? and ?&args=[0,2]
+SELECT callsign FROM %s GROUP BY callsign HAVING count(callsign) BETWEEN $1 and $2&args=[0,2]
+SELECT callsign FROM %s GROUP BY callsign HAVING count(callsign) BETWEEN $p1 and $p2&$p1=0&$p2=2

@@ -4,13 +4,12 @@ Created on 21-Mar-2018
 @author: tanzeem
 '''
 import json
-import datetime
+import time
 
 from cbas.cbas_base import CBASBaseTest
 from cbas.cbas_utils import cbas_utils
 from basetestcase import RemoteMachineShellConnection
 from node_utils.node_ready_functions import NodeHelper
-
 
 class CbasLogging(CBASBaseTest):
     # Dictionary containing the default logging configuration that we set and verify if they are set
@@ -33,9 +32,11 @@ class CbasLogging(CBASBaseTest):
         CbasLogging.DEFAULT_LOGGER_CONFIG_DICT = {"org.apache.asterix": "INFO",
                                                   "com.couchbase.client.dcp.conductor.DcpChannel": "WARN",
                                                   "com.couchbase.client.core.node": "WARN",
-                                                  "com.couchbase.analytics": "INFO",
-                                                  "org.apache.hyracks": "INFO",
-                                                  "": "INFO"} # Empty string corresponds to ROOT logger
+                                                  "com.couchbase.analytics": "DEBUG",
+                                                  "org.apache.hyracks": "DEBUG",
+                                                  "org.apache.asterix": "DEBUG",
+                                                  "org.apache.hyracks.http.server.CLFLogger": "ACCESS",
+                                                  "": "ERROR"} # Empty string corresponds to ROOT logger
 
         # Fetch the NC node ID and add trace logger to default logger config dictionary, trace logger has NodeId so this has to be picked at run time
         _, node_id, _ = self.cbas_util.retrieve_nodes_config()
@@ -268,33 +269,26 @@ class CbasLogging(CBASBaseTest):
             shell_nc.kill_process(process_name, service_name)
 
         if restart_couchbase:
-            self.log.info("Restart couchbase CC node ")
-            shell_cc.restart_couchbase()
-
-            self.log.info("Restart couchbase NC node ")
-            shell_nc.restart_couchbase()
+            self.log.info("Restart couchbase service")
+            status, _, _ = self.cbas_util.restart_analytics_cluster_uri()
+            self.assertTrue(status, msg="Failed to restart cbas")
 
         if reboot:
             self.log.info("Reboot couchbase CC node")
-            NodeHelper.reboot_server(self.cbas_node, self)
+            NodeHelper.reboot_server_new(self.cbas_node, self)
 
             self.log.info("Reboot couchbase NC node")
-            NodeHelper.reboot_server(self.cbas_servers[0], self)
+            NodeHelper.reboot_server_new(self.cbas_servers[0], self)
 
-        end_time = datetime.datetime.now() + datetime.timedelta(minutes=int(1))
-        self.log.info("Wait for nodes to be bootstrapped, neglect the unreachable server exceptions")
-        while datetime.datetime.now() < end_time:
+        self.log.info("Wait for request to complete and cluster to be active: Using private ping() function")
+        cluster_recover_start_time = time.time()
+        while time.time() < cluster_recover_start_time + 180:
             try:
-                self.log.info("Get the logging configurations")
-                status, content, response = self.cbas_util.get_log_level_on_cbas()
-                self.assertTrue(status, msg="Response status incorrect for GET request")
-
-                self.log.info("Convert response to a dictionary")
-                log_dict = CbasLogging.convert_logger_get_result_to_a_dict(content)
-                if len(log_dict) >= len(CbasLogging.DEFAULT_LOGGER_CONFIG_DICT):
+                status, metrics, _, cbas_result, _ = self.cbas_util.execute_statement_on_cbas_util("set `import-private-functions` `true`;ping()")
+                if status == "success":
                     break
-            except Exception as e:
-                pass
+            except:
+                self.sleep(3, message="Wait for service to up")
 
         self.log.info("Verify logging configuration post service kill")
         for name, level in CbasLogging.DEFAULT_LOGGER_CONFIG_DICT.items():

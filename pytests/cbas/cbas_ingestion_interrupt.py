@@ -23,6 +23,7 @@ class IngestionInterrupt_CBAS(CBASBaseTest):
             self.otpNodes.extend(self.add_all_nodes_then_rebalance(self.cbas_servers))
             
         self.create_default_bucket()
+        self.cb_bucket_name = self.input.param('cb_bucket_name', 'default')
         self.cbas_util.createConn("default")
     def setup_for_test(self, skip_data_loading=False):
         
@@ -481,4 +482,84 @@ class IngestionInterrupt_CBAS(CBASBaseTest):
         
         if not self.cbas_util.validate_cbas_dataset_items_count(self.cbas_dataset_name,self.num_items*3):
             self.fail("No. of items in CBAS dataset do not match that in the CB bucket")
-                                
+
+    def test_network_hardening(self):
+        self.setup_for_test()
+        
+        end = self.num_items
+        CC = self.cbas_node
+        NC = self.cbas_servers          
+        KV = self.master
+        nodes = [CC] + NC
+        
+        for node in nodes: 
+            for i in xrange(2):        
+                NodeHelper.enable_firewall(node)
+                
+                start = end
+                end = start + self.num_items
+                tasks = self.perform_doc_ops_in_all_cb_buckets(self.num_items, "create", start,
+                                                                   end, batch_size=1000,_async=True)
+                
+                self.sleep(30, "Sleep after enabling firewall on node %s then disbale it."%node.ip)
+                NodeHelper.disable_firewall(node)
+                
+                items_in_cbas_bucket = 0
+                start_time=time.time()
+                while (items_in_cbas_bucket == 0 or items_in_cbas_bucket == -1) and time.time()<start_time+60:
+                    try:
+                        items_in_cbas_bucket, _ = self.cbas_util.get_num_items_in_cbas_dataset(self.cbas_dataset_name)
+                    except:
+                        pass        
+                self.log.info("Items after network is up: %s"%items_in_cbas_bucket)
+        
+                if items_in_cbas_bucket < end and items_in_cbas_bucket>start:
+                    self.log.info("Data Ingestion Interrupted successfully")
+                elif items_in_cbas_bucket < start:
+                    self.log.info("Data Ingestion did not interrupted but restarting from 0.")
+                else:
+                    self.log.info("Data Ingestion did not interrupted but complete before service restart.")
+                    
+                query = "select count(*) from {0};".format(self.cbas_dataset_name)
+                self.cbas_util._run_concurrent_queries(query,"immediate",100)
+                
+                for task in tasks:
+                    task.get_result()
+                    
+                if not self.cbas_util.validate_cbas_dataset_items_count(self.cbas_dataset_name,end):
+                    self.fail("No. of items in CBAS dataset do not match that in the CB bucket")
+    
+                NodeHelper.enable_firewall(node,bidirectional=True)
+                
+                start = end
+                end = start + self.num_items
+                tasks = self.perform_doc_ops_in_all_cb_buckets(self.num_items, "create", start,
+                                                                   end, batch_size=1000,_async=True)
+                
+                self.sleep(30, "Sleep after enabling firewall on CC node then disbale it.")
+                NodeHelper.disable_firewall(node)
+                
+                items_in_cbas_bucket = 0
+                start_time=time.time()
+                while (items_in_cbas_bucket == 0 or items_in_cbas_bucket == -1) and time.time()<start_time+60:
+                    try:
+                        items_in_cbas_bucket, _ = self.cbas_util.get_num_items_in_cbas_dataset(self.cbas_dataset_name)
+                    except:
+                        pass        
+                self.log.info("Items after network is up: %s"%items_in_cbas_bucket)
+        
+                if items_in_cbas_bucket < end and items_in_cbas_bucket>start:
+                    self.log.info("Data Ingestion Interrupted successfully")
+                elif items_in_cbas_bucket < start:
+                    self.log.info("Data Ingestion did not interrupted but restarting from 0.")
+                else:
+                    self.log.info("Data Ingestion did not interrupted but complete before service restart.")
+                    
+                query = "select count(*) from {0};".format(self.cbas_dataset_name)
+                self.cbas_util._run_concurrent_queries(query,"immediate",100)
+                
+                for task in tasks:
+                    task.get_result()
+                    
+                if not self.cbas_util.validate_cbas_dataset_items_count(self.cbas_dataset_name,end):
+                    self.fail("No. of items in CBAS dataset do not match that in the CB bucket")

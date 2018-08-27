@@ -674,6 +674,7 @@ class RestConnection(object):
         authorization = base64.encodestring('%s:%s' % (self.username, self.password))
         return {'Content-Type': 'application/json',
                 'Authorization': 'Basic %s' % authorization,
+                'Connection': 'close',
                 'Accept': '*/*'}
 
     def _create_headers_with_auth(self, username, password):
@@ -685,12 +686,14 @@ class RestConnection(object):
         authorization = base64.encodestring('%s:%s' % (self.username, self.password))
         return {'Content-Type': 'application/x-www-form-urlencoded',
                 'Authorization': 'Basic %s' % authorization,
+                'Connection': 'close',
                 'Accept': '*/*'}
 
     # authorization must be a base64 string of username:password
     def _create_headers_encoded_prepared(self):
         authorization = base64.encodestring('%s:%s' % (self.username, self.password))
         return {'Content-Type': 'application/json',
+                'Connection': 'close',
                 'Authorization': 'Basic %s' % authorization}
 
     def _get_auth(self, headers):
@@ -1570,6 +1573,16 @@ class RestConnection(object):
             node = RestParser().parse_get_nodes_response(json_parsed)
         return node
 
+    # returns node data for this host
+    def get_jre_path(self, timeout=120):
+        api = self.baseUrl + 'nodes/self'
+        status, content, header = self._http_request(api, timeout=timeout)
+        if status:
+            json_parsed = json.loads(content)
+            return json_parsed
+        else:
+            raise Exception("Unable to get jre path from ns-server")
+
     def node_statuses(self, timeout=120):
         nodes = []
         api = self.baseUrl + 'nodeStatuses'
@@ -1932,6 +1945,29 @@ class RestConnection(object):
                 log.info("Setting paths: {0}: status {1}".format(data, status))
             else:
                 log.error("Unable to set data_path {0} : {1}".format(data, content))
+            return status
+
+    def set_jre_path(self,jre_path=None,set=True):
+        api = self.baseUrl + '/nodes/self/controller/settings'
+        from urllib3._collections import HTTPHeaderDict
+        data = HTTPHeaderDict()
+        paths={}
+        if jre_path:
+            data.add('java_home',jre_path)
+            paths['java_home']=jre_path
+
+        if paths:
+            params = urllib.urlencode(paths)
+            log.info('/nodes/self/controller/settings params : {0}'.format(urllib.urlencode(data)))
+            status, content, header = self._http_request(api, 'POST', urllib.urlencode(data))
+            if status:
+                log.info("Setting paths: {0}: status {1}".format(data, status))
+            else:
+                log.info("Unable to set data_path {0} : status {1}".format(data, status))
+                if not set:
+                    return content
+                else:
+                    exit(1)
             return status
 
     def get_database_disk_size(self, bucket='default'):

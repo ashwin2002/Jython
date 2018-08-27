@@ -33,7 +33,7 @@ class cbas_utils():
 #         self.bucket_util.create_default_bucket()
 #         self.createConn("default")
     
-    def execute_statement_on_cbas_util(self, statement, mode=None, rest=None, timeout=120, client_context_id=None, username=None, password=None, analytics_timeout=120):
+    def execute_statement_on_cbas_util(self, statement, mode=None, rest=None, timeout=120, client_context_id=None, username=None, password=None, analytics_timeout=120, time_out_unit="s"):
         """
         Executes a statement on CBAS using the REST API using REST Client
         """
@@ -41,7 +41,7 @@ class cbas_utils():
         try:
             log.info("Running query on cbas: %s"%statement)
             response = self.cbas_helper.execute_statement_on_cbas(statement, mode, pretty,
-                                                      timeout, client_context_id, username, password, analytics_timeout=analytics_timeout)
+                                                      timeout, client_context_id, username, password, analytics_timeout=analytics_timeout, time_out_unit=time_out_unit)
             if type(response) == str: 
                 response = json.loads(response)
             if "errors" in response:
@@ -73,6 +73,52 @@ class cbas_utils():
             return response["status"], metrics, errors, results, handle
     
         except Exception,e:
+            raise Exception(str(e))
+
+    def execute_parameter_statement_on_cbas_util(self, statement, mode=None, rest=None, timeout=120,
+                                                 client_context_id=None, username=None, password=None,
+                                                 analytics_timeout=120, parameters=[]):
+        """
+        Executes a statement on CBAS using the REST API using REST Client
+        """
+        pretty = "true"
+        try:
+            log.info("Running query on cbas: %s" % statement)
+            response = self.cbas_helper.execute_parameter_statement_on_cbas(statement, mode, pretty, timeout,
+                                                                            client_context_id, username, password,
+                                                                            analytics_timeout=analytics_timeout,
+                                                                            parameters=parameters)
+            if type(response) == str:
+                response = json.loads(response)
+            if "errors" in response:
+                errors = response["errors"]
+                if type(errors) == str:
+                    errors = json.loads(errors)
+            else:
+                errors = None
+
+            if "results" in response:
+                results = response["results"]
+                if type(results) == str:
+                    results = json.loads(results, parse_int=int)
+            else:
+                results = None
+
+            if "handle" in response:
+                handle = response["handle"]
+            else:
+                handle = None
+
+            if "metrics" in response:
+                metrics = response["metrics"]
+                if type(metrics) == str:
+                    metrics = json.loads(metrics)
+            else:
+                metrics = None
+
+            return response["status"], metrics, errors, results, handle
+
+        except Exception, e:
             raise Exception(str(e))
 
     def create_dataverse_on_cbas(self, dataverse_name=None,
@@ -246,6 +292,7 @@ class cbas_utils():
 
     def connect_link(self, link_name="Local",
                           validate_error_msg=False,
+                          with_force=False,
                           username=None, 
                           password=None, 
                           expected_error=None,
@@ -253,7 +300,10 @@ class cbas_utils():
         """
         Connects to a Link
         """
-        cmd_connect_bucket = "connect link %s;"%link_name
+        cmd_connect_bucket = "connect link %s" % link_name
+        
+        if with_force is True:
+            cmd_connect_bucket += " with {'force':true}"
         
         retry_attempt = 5
         connect_bucket_failed = True
@@ -471,7 +521,7 @@ class cbas_utils():
             while count != expected_count and tries > 0:
                 time.sleep(10)
                 count, mutated_count = self.get_num_items_in_cbas_dataset(
-                    dataset_name)
+                    dataset_name,timeout=timeout,analytics_timeout=analytics_timeout)
                 tries -= 1
 
         self.log.info("Expected Count: %s, Actual Count: %s" % (expected_count, count))
@@ -489,7 +539,11 @@ class cbas_utils():
         Deletes a request from CBAS
         """
         try:
-            payload = "client_context_id=" + client_context_id
+            if client_context_id == None:
+                payload = "client_context_id=None"
+            else:
+                payload = "client_context_id=" + client_context_id
+                
             status = self.cbas_helper.delete_active_request_on_cbas(payload,username, password)
             self.log.info (status)
             return status
@@ -604,17 +658,17 @@ class cbas_utils():
                                                                    statement,
                                                                    mode,
                                                                    pretty))
-
-        for task in tasks:
-            task.get_result()
-            if not task.passed:
-                fail_count += 1
-
-        if fail_count:
-            self.log.info("%s out of %s queries failed!" % (fail_count, num_queries))
-        else:
-            self.log.info("SUCCESS: %s out of %s queries passed"
-                          % (num_queries - fail_count, num_queries))
+        return tasks
+        #for task in tasks:
+        #    task.get_result()
+        #    if not task.passed:
+        #        fail_count += 1
+        #
+        #if fail_count:
+        #    self.log.info("%s out of %s queries failed!" % (fail_count, num_queries))
+        #else:
+        #    self.log.info("SUCCESS: %s out of %s queries passed"
+        #                  % (num_queries - fail_count, num_queries))
 
     def _run_concurrent_queries(self, query, mode, num_queries, rest=None, batch_size = 100, timeout=300, analytics_timeout=300):
         self.failed_count = 0
@@ -1100,3 +1154,21 @@ class cbas_utils():
     def fetch_bucket_state_on_cbas(self):
         status, content, response = self.cbas_helper.fetch_bucket_state_on_cbas(method="GET", username=None, password=None)
         return status, content, response
+
+    def fetch_pending_mutation_on_cbas_node(self, node_ip, port=9110, username=None, password=None):
+        status, content, response = self.cbas_helper.fetch_pending_mutation_on_cbas_node(node_ip, port, method="GET", username=username, password=password)
+        return status, content, response
+
+    def fetch_pending_mutation_on_cbas_cluster(self, port=9110, username=None, password=None):
+        status, content, response = self.cbas_helper.fetch_pending_mutation_on_cbas_cluster(port, method="GET", username=username, password=password)
+        return status, content, response
+    
+    def fetch_dcp_state_on_cbas(self, dataset, dataverse="Default", username=None, password=None):
+        if not dataset:
+            raise ValueError("dataset is required field")
+        status, content, response = self.cbas_helper.fetch_dcp_state_on_cbas(dataset, method="GET", dataverse=dataverse, username=username, password=password)
+        return status, content, response
+
+    def get_analytics_diagnostics(self, cbas_node, timeout=120):
+         response = self.cbas_helper.get_analytics_diagnostics(cbas_node,timeout=timeout)
+         return response

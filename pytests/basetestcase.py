@@ -165,6 +165,9 @@ class BaseTestCase(unittest.TestCase, bucket_utils, cluster_utils, failover_util
             self.sasl_bucket_name = "bucket"
             self.sasl_bucket_priority = self.input.param("sasl_bucket_priority", None)
             self.standard_bucket_priority = self.input.param("standard_bucket_priority", None)
+
+            #jre-path for cbas
+            self.jre_path=self.input.param("jre_path",None)
             # end of bucket parameters spot (this is ongoing)
 
             if self.skip_setup_cleanup:
@@ -508,6 +511,11 @@ class BaseTestCase(unittest.TestCase, bucket_utils, cluster_utils, failover_util
                 ram = remote_client.extract_remote_info().ram
                 log.info("{0}: {1} MB".format(server.ip, ram))
                 remote_client.disconnect()
+
+        if self.jre_path:
+            for server in servers:
+                rest = RestConnection(server)
+                rest.set_jre_path(self.jre_path)
         return quota
 
     def verify_cluster_stats(self, servers=None, master=None, max_verify=None,

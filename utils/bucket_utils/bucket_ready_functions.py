@@ -1382,7 +1382,7 @@ class bucket_utils():
         client.close()
         return inserted_keys
 
-    def perform_doc_ops_in_all_cb_buckets(self, num_items, operation, start_key=0, end_key=1000, batch_size=5000, exp=0):
+    def perform_doc_ops_in_all_cb_buckets(self, num_items, operation, start_key=0, end_key=1000, batch_size=5000, exp=0, _async=False):
         """
         Create/Update/Delete docs in all cb buckets
         :param num_items: No. of items to be created/deleted/updated
@@ -1399,9 +1399,13 @@ class bucket_utils():
                                      start=start_key, end=end_key)
         self.log.info("%s %s documents..." % (operation, num_items))
         try:
-            self.log.info("BATCH SIZE for documents load: %s" % batch_size)
-            self._load_all_buckets(self.master, gen_load, operation, exp, batch_size=batch_size)
-            self._verify_stats_all_buckets(self.input.servers)
+            if not _async:
+                self.log.info("BATCH SIZE for documents load: %s" % batch_size)
+                self._load_all_buckets(self.master, gen_load, operation, exp, batch_size=batch_size)
+                self._verify_stats_all_buckets(self.input.servers)
+            else:
+                tasks = self._async_load_all_buckets(self.master, gen_load, operation, exp, batch_size=batch_size)
+                return tasks
         except Exception as e:
             self.log.info(e.message)
 
@@ -1425,4 +1429,111 @@ class bucket_utils():
             total_available_memory_in_mb -= info.eventingMemoryQuota
 
         return total_available_memory_in_mb
+
+    def load_buckets_with_high_ops(self, server, bucket, items, batch=2000,
+                                   threads=5, start_document=0, instances=1, ttl=0):
+        import subprocess
+        cmd_format = "python utils/bucket_utils/thanosied.py  --spec couchbase://{0} --bucket {1} --user {2} --password {3} " \
+                     "--count {4} --batch_size {5} --threads {6} --start_document {7} --cb_version {8} --workers {9} --ttl {10} --rate_limit {11} " \
+                     "--passes 1"
+        cb_version = RestConnection(server).get_nodes_version()[:3]
+        if self.num_replicas > 0 and self.use_replica_to:
+            cmd_format = "{} --replicate_to 1".format(cmd_format)
+        cmd = cmd_format.format(server.ip, bucket.name, server.rest_username,
+                                server.rest_password,
+                                items, batch, threads, start_document,
+                                cb_version, instances, ttl, self.rate_limit)
+        self.log.info("Running {}".format(cmd))
+        result = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE)
+        output = result.stdout.read()
+        error = result.stderr.read()
+        if error:
+            # self.log.error(error)
+            if "Authentication failed" in error:
+                cmd = cmd_format.format(server.ip, bucket.name, server.rest_username,
+                                        server.rest_password,
+                                        items, batch, threads, start_document,
+                                        "4.0", instances, ttl, self.rate_limit)
+                self.log.info("Running {}".format(cmd))
+                result = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
+                                          stderr=subprocess.PIPE)
+                output = result.stdout.read()
+                error = result.stderr.read()
+                if error:
+                    self.log.error(error)
+                    self.fail("Failed to run the loadgen.")
+        if output:
+            loaded = output.split('\n')[:-1]
+            total_loaded = 0
+            for load in loaded:
+                total_loaded += int(load.split(':')[1].strip())
+            self.assertEqual(total_loaded, items,
+                             "Failed to load {} items. Loaded only {} items".format(
+                                 items,
+                                 total_loaded))
+
+    def delete_buckets_with_high_ops(self, server, bucket, items, ops,
+                                         batch=20000, threads=5,
+                                         start_document=0,
+                                         instances=1):
+            import subprocess
+            # cmd_format = "python scripts/high_ops_doc_gen.py  --node {0} --bucket {1} --user {2} --password {3} " \
+            #              "--count {4} --batch_size {5} --threads {6} --start_document {7} --cb_version {8} --instances {" \
+            #              "9} --ops {10} --delete"
+            cmd_format = "python utils/bucket_utils/thanosied.py  --spec couchbase://{0} --bucket {1} --user {2} --password {3} " \
+                         "--count {4} --batch_size {5} --threads {6} --start_document {7} --cb_version {8} --workers {9} --rate_limit {10} " \
+                         "--passes 1  --delete --num_delete {4}"
+            cb_version = RestConnection(server).get_nodes_version()[:3]
+            if self.num_replicas > 0 and self.use_replica_to:
+                cmd_format = "{} --replicate_to 1".format(cmd_format)
+            cmd = cmd_format.format(server.ip, bucket.name, server.rest_username,
+                                    server.rest_password,
+                                    items, batch, threads, start_document,
+                                    cb_version, instances, ops)
+            self.log.info("Running {}".format(cmd))
+            result = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE)
+            output = result.stdout.read()
+            error = result.stderr.read()
+            if error:
+                self.log.error(error)
+                self.fail("Failed to run the loadgen.")
+            if output:
+                loaded = output.split('\n')[:-1]
+                total_loaded = 0
+                for load in loaded:
+                    total_loaded += int(load.split(':')[1].strip())
+                self.assertEqual(total_loaded, ops,
+                                 "Failed to update {} items. Loaded only {} items".format(
+                                     ops,
+                                     total_loaded))
+
+
+    def check_dataloss_for_high_ops_loader(self, server, bucket, items,
+                                           batch=2000, threads=5,
+                                           start_document=0,
+                                           updated=False, ops=0, ttl=0, deleted=False, deleted_items=0):
+        import subprocess
+        from lib.memcached.helper.data_helper import VBucketAwareMemcached
+        cmd_format = "python utils/bucket_utils/thanosied.py  --spec couchbase://{0} --bucket {1} --user {2} --password {3} " \
+                     "--count {4} --batch_size {5} --threads {6} --start_document {7} --cb_version {8} --validation 1 --rate_limit {9}  " \
+                     "--passes 1"
+        cb_version = RestConnection(server).get_nodes_version()[:3]
+        if updated:
+            cmd_format = "{} --updated --ops {}".format(cmd_format, ops)
+        if deleted:
+            cmd_format = "{} --deleted --deleted_items {}".format(cmd_format, deleted_items)
+        if ttl > 0:
+            cmd_format = "{} --ttl {}".format(cmd_format, ttl)
+        cmd = cmd_format.format(server.ip, bucket.name, server.rest_username,
+                                server.rest_password,
+                                int(items), batch, threads, start_document, cb_version, self.rate_limit)
+        self.log.info("Running {}".format(cmd))
+        result = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE)
+        output = result.stdout.read()
+        error = result.stderr.read()
+        errors = []
+        return errors
 

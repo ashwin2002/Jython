@@ -797,9 +797,3 @@ class CBASSecondaryIndexes(CBASBaseTest):
         self.assertEquals(status, "success")
         self.assertEquals(errors, None)
         self.assertEquals(results, [{'$1': 107303}])
-        self.cbas_util.drop_dataset(self.cbas_dataset_name)
-
-        status, metrics, errors, results, _ = self.cbas_util.execute_statement_on_cbas_util(
-            statement)
-        self.assertEquals(errors, [
-            {u'msg': u'Cannot find dataset beer_ds in dataverse Default nor an alias with name beer_ds!', u'code': 1}])

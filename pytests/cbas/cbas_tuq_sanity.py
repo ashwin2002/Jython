@@ -2,6 +2,9 @@
 import json
 import math
 
+from cbas.cbas_base import CBASBaseTest
+from sdk_client import SDKClient
+
 '''
 Created on Mar 16, 2018
 
@@ -171,17 +174,17 @@ class CBASTuqSanity(QuerySanityTests):
            "15:04:05+07:00",
            "15:04:05"]
 
-    def test_regex_replace(self):
-        for bucket in self.buckets:
-            self.query = "select name, REGEXP_REPLACE(email, '-mail', 'domain') as mail from %s" % (bucket.name)
-
-            actual_list = self.run_cbq_query()
-            actual_result = sorted(actual_list['results'])
-            expected_result = [{"name" : doc["name"],
-                                "mail" : doc["email"].replace('-mail', 'domain')}
-                               for doc in self.full_list]
-            expected_result = sorted(expected_result)
-            self._verify_results(actual_result, expected_result)
+#     def test_regex_replace(self):
+#         for bucket in self.buckets:
+#             self.query = "select name, REGEXP_REPLACE(email, '-mail', 'domain') as mail from %s" % (bucket.name)
+# 
+#             actual_list = self.run_cbq_query()
+#             actual_result = sorted(actual_list['results'])
+#             expected_result = [{"name" : doc["name"],
+#                                 "mail" : doc["email"].replace('-mail', 'domain')}
+#                                for doc in self.full_list]
+#             expected_result = sorted(expected_result)
+#             self._verify_results(actual_result, expected_result)
             
     def test_to_str(self):
         for bucket in self.buckets:
@@ -566,6 +569,161 @@ class CBASTuqSanity(QuerySanityTests):
             expected_result = sorted(expected_result, key=lambda doc: (doc['job_title']))
             self._verify_results(actual_result, expected_result)
 
+    def test_array_concat(self):
+        for bucket in self.buckets:
+            self.query = "SELECT job_title," +\
+                         " array_concat((select value %s.name from g), (select value %s.email from g)) as names"% (bucket.name,bucket.name) +\
+                         " FROM %s GROUP BY job_title GROUP AS g" % (bucket.name)
+
+            actual_list = self.run_cbq_query()
+            actual_result = self.sort_nested_list(actual_list['results'])
+            actual_result1 = sorted(actual_result, key=lambda doc: (doc['job_title']))
+            tmp_groups = set([doc['job_title'] for doc in self.full_list])
+            expected_result = [{"job_title" : group,
+                                "names" : sorted([x["name"] for x in self.full_list
+                                                  if x["job_title"] == group] + \
+                                                 [x["email"] for x in self.full_list
+                                                  if x["job_title"] == group])}
+                               for group in tmp_groups]
+            expected_result1 = sorted(expected_result, key=lambda doc: (doc['job_title']))
+
+            self._verify_results(actual_result1, expected_result1)
+
+            self.query = "SELECT job_title," +\
+                         " array_concat((select value %s.name from g), (select value %s.email from g), (select value %s.join_day from g)) as names"%(bucket.name,bucket.name,bucket.name) +\
+                         " FROM %s GROUP BY job_title GROUP AS g limit 10" % (bucket.name)
+
+            actual_list = self.run_cbq_query()
+            actual_result = self.sort_nested_list(actual_list['results'])
+            actual_result2 = sorted(actual_result, key=lambda doc: (doc['job_title']))
+
+
+            expected_result = [{"job_title" : group,
+                                "names" : sorted([x["name"] for x in self.full_list
+                                                  if x["job_title"] == group] + \
+                                                 [x["email"] for x in self.full_list
+                                                  if x["job_title"] == group] + \
+                                                 [x["join_day"] for x in self.full_list
+                                                  if x["job_title"] == group])}
+                               for group in tmp_groups][0:10]
+            expected_result2 = sorted(expected_result, key=lambda doc: (doc['job_title']))
+            self.assertTrue(actual_result2==expected_result2)
+
+    def test_array_distinct(self):
+        for bucket in self.buckets:
+            self.query = "SELECT job_title, array_distinct((select value %s.name from g)) as names"%(bucket.name) +\
+            " FROM %s GROUP BY job_title GROUP AS g" % (bucket.name)
+
+            actual_list = self.run_cbq_query()
+            actual_result = self.sort_nested_list(actual_list['results'])
+            actual_result = sorted(actual_result, key=lambda doc: (doc['job_title']))
+
+            tmp_groups = set([doc['job_title'] for doc in self.full_list])
+            expected_result = [{"job_title" : group,
+                                "names" : sorted(set([x["name"] for x in self.full_list
+                                               if x["job_title"] == group]))}
+                               for group in tmp_groups]
+            expected_result = sorted(expected_result, key=lambda doc: (doc['job_title']))
+            self._verify_results(actual_result, expected_result)
+
+    def test_array_replace(self):
+        for bucket in self.buckets:
+
+            self.query = "SELECT job_title, array_replace((select value %s.name from g), 'employee-1', 'employee-47') as emp_job"%(bucket.name) +\
+            " FROM %s GROUP BY job_title GROUP AS g" % (bucket.name)
+
+            actual_list = self.run_cbq_query()
+            actual_result = self.sort_nested_list(actual_list['results'])
+            actual_result = sorted(actual_result,
+                                   key=lambda doc: (doc['job_title']))
+            tmp_groups = set([doc['job_title'] for doc in self.full_list])
+            expected_result = [{"job_title" : group,
+                                "emp_job" : sorted(["employee-47" if x["name"] == 'employee-1' else x["name"]
+                                             for x in self.full_list
+                                             if x["job_title"] == group])}
+                               for group in tmp_groups]
+            expected_result = sorted(expected_result, key=lambda doc: (doc['job_title']))
+            self._verify_results(actual_result, expected_result)
+
+    def test_array_union_symdiff(self):
+        for bucket in self.buckets:
+            self.query = 'select ARRAY_SORT(ARRAY_UNION(["skill1","skill2","skill2010","skill2011"],skills)) as skills_union from {0} order by meta().id limit 5'.format(bucket.name)
+            actual_result = self.run_cbq_query()
+            self.assertTrue(actual_result['results']==([{u'skills_union': [u'skill1', u'skill2', u'skill2010', u'skill2011']}, {u'skills_union': [u'skill1', u'skill2', u'skill2010', u'skill2011']},
+                            {u'skills_union': [u'skill1', u'skill2', u'skill2010', u'skill2011']}, {u'skills_union': [u'skill1', u'skill2', u'skill2010', u'skill2011']},
+                            {u'skills_union': [u'skill1', u'skill2', u'skill2010', u'skill2011']}]))
+
+            self.query = 'select ARRAY_SORT(ARRAY_SYMDIFF(["skill1","skill2","skill2010","skill2011"],skills)) as skills_diff1 from {0} order by meta().id limit 5'.format(bucket.name)
+            actual_result = self.run_cbq_query()
+            self.assertTrue(actual_result['results']==[{u'skills_diff1': [u'skill1', u'skill2']}, {u'skills_diff1': [u'skill1', u'skill2']}, {u'skills_diff1': [u'skill1', u'skill2']}, {u'skills_diff1': [u'skill1', u'skill2']}, {u'skills_diff1': [u'skill1', u'skill2']}])
+
+            self.query = 'select ARRAY_SORT(ARRAY_SYMDIFFN(skills,["skill2010","skill2011","skill2012"],["skills2010","skill2017"])) as skills_diff3 from {0} order by meta().id limit 5'.format(bucket.name)
+            actual_result = self.run_cbq_query()
+            self.assertTrue(actual_result['results'] == [{u'skills_diff3': [u'skill2012', u'skill2017', u'skills2010']}, {u'skills_diff3': [u'skill2012', u'skill2017', u'skills2010']}, {u'skills_diff3': [u'skill2012', u'skill2017', u'skills2010']}, {u'skills_diff3': [u'skill2012', u'skill2017', u'skills2010']}, {u'skills_diff3': [u'skill2012', u'skill2017', u'skills2010']}])
+
+    def test_array_intersect(self):
+        self.query = 'select ARRAY_INTERSECT([2011,2012,2016,"test"], [2011,2016], [2012,2016]) as test'
+        actual_result = self.run_cbq_query()
+        self.assertTrue(actual_result['results'][0]["test"] == [2016]) 
+
+    def test_array_star(self):
+        for bucket in self.buckets:
+            self.query = 'SELECT ARRAY_STAR(ARRAY_FLATTEN((select value VMs from %s  where %s.VMs is not missing limit 1),1)) as test'%(bucket.name,bucket.name)
+            actual_result = self.run_cbq_query()
+            self.assertTrue(len(actual_result['results'][0]["test"]["RAM"]) == 2)
+            self.assertTrue(len(actual_result['results'][0]["test"]["memory"]) == 2)
+            self.assertTrue(len(actual_result['results'][0]["test"]["name"]) == 2)
+            self.assertTrue(len(actual_result['results'][0]["test"]["os"]) == 2)
+
+    def test_array_sort(self):
+        for bucket in self.buckets:
+            self.query = "SELECT job_title, array_sort((select distinct value %s.test_rate from g)) as emp_job"%(bucket.name) +\
+            " FROM %s GROUP BY job_title GROUP AS g" % (bucket.name)
+            
+            actual_result = self.run_cbq_query()
+            actual_result = sorted(actual_result['results'],
+                                   key=lambda doc: (doc['job_title']))
+            tmp_groups = set([doc['job_title'] for doc in self.full_list])
+            expected_result = [{"job_title" : group,
+                                "emp_job" : sorted(set([x["test_rate"] for x in self.full_list
+                                             if x["job_title"] == group]))}
+                               for group in tmp_groups]
+            expected_result = sorted(expected_result, key=lambda doc: (doc['job_title']))
+            self._verify_results(actual_result, expected_result)
+            
+    def test_encode_json(self):
+        self.query = 'select ENCODE_JSON({"key":"value"})'
+        
+        actual_result = self.run_cbq_query()
+        self.assertTrue(actual_result['status'] == "success")
+
+    def test_decode_json(self):
+        self.query = '''select DECODE_JSON('{"key":"value"}')'''
+        
+        actual_result = self.run_cbq_query()
+        self.assertTrue(actual_result['status'] == "success")
+        self.assertTrue(actual_result['results'][0]['$1']["key"] == "value")
+        
+    def test_pairs(self):
+        for bucket in self.buckets:
+            self.query = 'select VMs as orig_t, PAIRS(VMs) AS pairs_t from %s  where %s.VMs is not missing limit 1'%(bucket.name,bucket.name)
+            actual_result = self.run_cbq_query()
+            pairs_t = actual_result['results'][0]["pairs_t"]
+            orig_t = actual_result['results'][0]["orig_t"]
+            
+            for item in orig_t:
+                for key in item.keys():
+                    self.assertTrue([key,item[key]] in pairs_t)
+                   
+    def test_array_flatten(self):
+        # Create bucket on CBAS
+        self.query = 'INSERT INTO %s (KEY, value) VALUES ("na", {"a":2, "b":[1,2,[31,32,33],4,[[511, 512], 52]]});'%(self.default_bucket_name)
+        result = RestConnection(self.master).query_tool(self.query)
+        self.assertTrue(result['status'] == "success")
+        self.query = 'SELECT ARRAY_FLATTEN(b,1) AS flatten_by_1level FROM default where meta().id = "na";'
+        actual_result = self.run_cbq_query()
+        self.assertTrue(actual_result['results'][0]["flatten_by_1level"] == [1,2,31,32,33,4,[511,512],52]) 
+             
     def test_check_types(self):
         types_list = [("name", "ISSTR", True), ("skills[0]", "ISSTR", True),
                       ("test_rate", "ISSTR", False), ("VMs", "ISSTR", False),
@@ -827,6 +985,20 @@ class CBASTuqSanity(QuerySanityTests):
             actual_result = sorted(actual_result['results'], key=lambda doc: (doc['name']))
             self._verify_results(actual_result, expected_result)
 
+    def test_tan(self):
+        self.query = "select tan(radians(45))"
+        actual_list = self.run_cbq_query()
+        expected_result = 1
+        actual_result = int(math.ceil(actual_list['results'][0]['$1']*1000000000000000)/1000000000000000)
+        self.assertTrue(actual_result==expected_result, "The result of the query is: %s"%actual_list)
+        
+    def test_asin(self):
+        self.query = "select degrees(asin(0.5))"
+        actual_list = self.run_cbq_query()
+        actual_result = int(math.ceil(actual_list['results'][0]['$1']*1000000000000000)/1000000000000000)
+        expected_result = 30
+        self.assertTrue(actual_result==expected_result, "The result of the query is: %s"%actual_list)
+        
     def test_clock_formats(self):
         self.query = 'SELECT NOW_LOCAL("2006-01-02") as NOW_LOCAL, \
         NOW_STR("2006-01-02") as NOW_STR, \
@@ -1103,3 +1275,101 @@ class DateTimeFunctionClass_cbas(DateTimeFunctionClass):
                                  "Actual result {0} and expected result {1} don't match for {2} milliseconds and \
                                  {3} parts".format(actual_local_result["results"][0], expected_local_result["results"][0]["$1"],
                                                    milliseconds, part))
+
+
+class CBASBacklogQueries(CBASBaseTest):
+    """
+    cbas.cbas_tuq_sanity.CBASBacklogQueries.test_correlated_aggregation_columns,default_bucket=True,cb_bucket_name=default,cbas_dataset_name=ds
+    """
+    def test_correlated_aggregation_columns(self):
+        self.log.info("Create a reference to SDK client")
+        client = SDKClient(hosts=[self.master.ip], bucket=self.cb_bucket_name, password=self.master.rest_password)
+
+        self.log.info("Insert documents in KV bucket")
+        documents = [
+            '{"name":"tony","salary":100,"dept":"engineering"}',
+            '{"name":"alex","salary":50,"dept":"engineering"}',
+            '{"name":"bob","salary":75,"dept":"IT"}',
+            '{"name":"charles","salary":175,"dept":"IT"}'
+        ]
+        client.insert_json_documents("id-", documents)
+
+        self.log.info("Create dataset")
+        self.cbas_util.create_dataset_on_bucket(self.cb_bucket_name, self.cbas_dataset_name)
+
+        self.log.info("Connect to Local link")
+        self.cbas_util.connect_link()
+
+        self.log.info("Validate count on CBAS")
+        self.assertTrue(self.cbas_util.validate_cbas_dataset_items_count(self.cbas_dataset_name, len(documents)), msg="Count mismatch on CBAS")
+
+        self.log.info("Assert correlated aggregate columns")
+        correlated_query = """from ds as e 
+                           group by dept group as g
+                           let highest_salary = max(e.salary),
+                           best_paid = (from g
+                           where g.e.salary = highest_salary
+                           select g.e.name)
+                           select dept, highest_salary, best_paid;"""
+        status, result, errors, a, b = self.cbas_util.execute_statement_on_cbas_util(correlated_query)
+        self.assertEquals(status, "success", msg="correlated aggregation query failed.")
+
+    """
+    cbas.cbas_tuq_sanity.CBASBacklogQueries.test_mod_operator,default_bucket=False
+    """
+    def test_mod_operator(self):
+        query = "select 5 mod 2;"
+        status, _, _, result, _ = self.cbas_util.execute_statement_on_cbas_util(query, "immediate")
+        expected_result = {
+            "$1": 1
+        }
+        self.assertTrue(status == "success")
+        self.assertTrue(result[0] == expected_result)
+
+    """
+    cbas.cbas_tuq_sanity.CBASBacklogQueries.test_div_operator,default_bucket=False
+    """
+    def test_div_operator(self):
+        query = "select 5 div 2;"
+        status, _, _, result, _ = self.cbas_util.execute_statement_on_cbas_util(query, "immediate")
+        expected_result = {
+            "$1": 2
+        }
+        self.assertTrue(status == "success")
+        self.assertTrue(result[0] == expected_result)
+
+    """
+    cbas.cbas_tuq_sanity.CBASBacklogQueries.test_substring_with_negative_position,default_bucket=False
+    """
+    def test_substring_with_negative_position(self):
+        query = 'select SUBSTR("abcdefg",-2);'
+        status, _, _, result, _ = self.cbas_util.execute_statement_on_cbas_util(query, "immediate")
+        expected_result = {
+            "$1": "fg"
+        }
+        self.assertTrue(status == "success")
+        self.assertTrue(result[0] == expected_result)
+
+    """
+    cbas.cbas_tuq_sanity.CBASBacklogQueries.test_substring_with_negative_position_greater_than_length,default_bucket=False
+    """
+    def test_substring_with_negative_position_greater_than_length(self):
+        query = 'select SUBSTR("abcdefg",-8);'
+        status, _, _, result, _ = self.cbas_util.execute_statement_on_cbas_util(query, "immediate")
+        expected_result = {
+            "$1": None
+        }
+        self.assertTrue(status == "success")
+        self.assertTrue(result[0] == expected_result)
+
+    """
+    cbas.cbas_tuq_sanity.CBASBacklogQueries.test_IFINF,default_bucket=False
+    """
+    def test_IFINF(self):
+        query = 'Select IFINF(2,1/0);'
+        status, _, _, result, _ = self.cbas_util.execute_statement_on_cbas_util(query, "immediate")
+        expected_result = {
+            "$1": 2
+        }
+        self.assertTrue(status == "success")
+        self.assertTrue(result[0] == expected_result)

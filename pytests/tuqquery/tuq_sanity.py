@@ -849,7 +849,7 @@ class QuerySanityTests(QueryTests):
             self.query = 'SELECT DISTINCT META(%s).flags as flags FROM %s'  % (
                                                                 bucket.name, bucket.name)
             actual_result = self.run_cbq_query()
-            expected_result = [{"flags" : self.item_flag}]
+            expected_result = [{"flags" : 33554432}]
             self._verify_results(actual_result['results'], expected_result)
 
     def test_long_values(self):

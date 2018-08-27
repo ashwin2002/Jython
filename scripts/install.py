@@ -219,6 +219,8 @@ class Installer(object):
                     names = ['couchbase-server-community']
                 elif "type" in params and params["type"].lower() in "couchbase-server-enterprise":
                     names = ['couchbase-server-enterprise']
+                elif "type" in params and params["type"].lower() in "no-jre":
+                    names = ['couchbase-server-enterprise-no-jre']
                 else:
                     names = ['couchbase-server-enterprise', 'couchbase-server-community']
             elif params["product"] in css_alias:

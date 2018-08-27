@@ -1,5 +1,7 @@
 from cbas_base import *
 from membase.api.rest_client import RestHelper
+import json
+import time
 
 class CBASDDLTests(CBASBaseTest):
     def setUp(self):
@@ -103,16 +105,13 @@ class CBASDDLTests(CBASBaseTest):
             self.assertTrue(result, "Dataverse Creation Failed.")
             
             cmd_use_dataset = "use %s;"%dataverse_name
+            cmd_create_dataset = 'create dataset travel_ds1 on `travel-sample`;'
+            cmd = cmd_use_dataset+cmd_create_dataset
             status, metrics, errors, results, _ = self.cbas_util.execute_statement_on_cbas_util(
-                cmd_use_dataset)
+                cmd)
             
-            result = self.cbas_util.create_dataset_on_bucket(
-                cbas_bucket_name=self.cb_bucket_name,
-                cbas_dataset_name=cbas_dataset_name)
-            self.assertTrue(result, "Dataset Creation Failed.")
-            
-        self.cbas_util.connect_link(link_name=dataverse_name+".Local")
-        self.assertTrue(self.cbas_util.validate_cbas_dataset_items_count(cbas_dataset_name, self.travel_sample_docs_count),"Data loss in CBAS.")
+            self.cbas_util.connect_link(link_name=dataverse_name+".Local")
+            self.assertTrue(self.cbas_util.validate_cbas_dataset_items_count(dataverse_name+"."+cbas_dataset_name, self.travel_sample_docs_count),"Data loss in CBAS.")
         
     def test_connect_link_delete_bucket(self):
         # Create dataset on the CBAS bucket
@@ -131,7 +130,18 @@ class CBASDDLTests(CBASBaseTest):
         
         self.bucket_util.delete_bucket_or_assert(self.master, "travel-sample", self)
         self.sleep(5, "Wait for 5 secs after deleting bucket.")
-                
+        
+        self.log.info("Request sent will now either succeed or fail, or its connection will be abruptly closed. Verify the state")
+        start_time = time.time()
+        
+        while start_time+120 > time.time():
+            status, content, _ = self.cbas_util.fetch_bucket_state_on_cbas()
+            self.assertTrue(status, msg="Fetch bucket state failed")
+            content = json.loads(content)
+            self.log.info(content)
+            if content['buckets'][0]['state'] == "disconnected":
+                break
+            
         for num in xrange(number_of_datasets):
             cbas_dataset_name = self.cbas_dataset_name+str(num)
             self.assertTrue(self.cbas_util.drop_dataset(cbas_dataset_name),"Drop dataset after deleting KV bucket failed without disconnecting link.")

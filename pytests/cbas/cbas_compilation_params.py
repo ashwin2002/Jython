@@ -104,7 +104,29 @@ class CBASCompilationParamsTests(CBASBaseTest):
         compiler_param_statement = "SET `compiler.groupmemory` \"50MB\"; SET `compiler.sortmemory` \"64MB\"; SET `compiler.joinmemory` \"64MB\"; SET `compiler.parallelism` \"0\";"
         join_query_statement = "select a.firstname, b.firstname from {0} a, {0} b where a.number=b.number;".format(
             self.cbas_dataset_name)
-        self.statement = compiler_param_statement + group_order_query_statement + join_query_statement
+        self.statement = compiler_param_statement + group_order_query_statement
+
+        try:
+            status, metrics, errors, results, handle = self.cbas_util.execute_statement_on_cbas_util(
+                self.statement, mode=self.mode, timeout=3600)
+            self.log.info("Status = %s", status)
+            if not self.expect_failure and status != "success":
+                self.fail("Unexpected failure")
+            elif self.expect_failure and status == "success":
+                self.fail("Unexpected success")
+        except Exception, e:
+            if str(e) == "Request Rejected":
+                self.log.info("Error 503 : Request Rejected")
+            elif str(e) == "Capacity cannot meet job requirement":
+                self.log.info(
+                    "Error 500 : Capacity cannot meet job requirement")
+            else:
+                self.log.error(str(e))
+
+            if not self.expect_failure:
+                self.fail("Unexpected Error")
+                
+        self.statement = compiler_param_statement + join_query_statement
 
         try:
             status, metrics, errors, results, handle = self.cbas_util.execute_statement_on_cbas_util(

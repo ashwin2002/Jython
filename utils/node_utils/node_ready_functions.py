@@ -3,6 +3,7 @@ Created on Sep 26, 2017
 
 @author: riteshagarwal
 '''
+import copy
 import logger
 import time
 import commands
@@ -13,6 +14,7 @@ from remote.remote_util import RemoteUtilHelper, RemoteMachineShellConnection
 from membase.api.rest_client import RestConnection
 from membase.api.exception import ServerUnavailableException
 from scripts.collect_server_info import cbcollectRunner
+from testconstants import LINUX_DISTRIBUTION_NAME
 
 class OS:
     WINDOWS = "windows"
@@ -30,7 +32,7 @@ def raise_if(cond, ex):
         raise ex
     
 class NodeHelper:
-    _log = logger.Logger.get_logger()
+    log = logger.Logger.get_logger()
 
     @staticmethod
     def disable_firewall(server):
@@ -46,7 +48,6 @@ class NodeHelper:
             shell.log_command_output(output, error)
             output, error = shell.execute_command('netsh advfirewall set privateprofile state off')
             shell.log_command_output(output, error)
-            # for details see RemoteUtilHelper.enable_firewall for windows
             output, error = shell.execute_command('netsh advfirewall firewall delete rule name="block erl.exe in"')
             shell.log_command_output(output, error)
             output, error = shell.execute_command('netsh advfirewall firewall delete rule name="block erl.exe out"')
@@ -64,6 +65,8 @@ class NodeHelper:
 #             shell.log_command_output(o, r)
 #             # self.log.info("enabled firewall on {0}".format(server))
             o, r = shell.execute_command("iptables -F")
+            shell.log_command_output(o, r)
+            o, r = shell.execute_command("/sbin/iptables -t nat -F")
             shell.log_command_output(o, r)
         shell.disconnect()
 
@@ -156,14 +159,54 @@ class NodeHelper:
             wait_if_warmup=True)
 
     @staticmethod
-    def enable_firewall(server):
+    def enable_firewall(server, bidirectional=False, xdcr=False):
         """Enable firewall
         @param server: server object to enable firewall
         @param rep_direction: replication direction unidirection/bidirection
         """
-        RemoteUtilHelper.enable_firewall(
-            server)
-
+        
+        """ Check if user is root or non root in unix """
+        shell = RemoteMachineShellConnection(server)
+        shell.info = shell.extract_remote_info()
+        if shell.info.type.lower() == "windows":
+            o, r = shell.execute_command('netsh advfirewall set publicprofile state on')
+            shell.log_command_output(o, r)
+            o, r = shell.execute_command('netsh advfirewall set privateprofile state on')
+            shell.log_command_output(o, r)
+            NodeHelper.log.info("enabled firewall on {0}".format(server))
+            suspend_erlang = shell.windows_process_utils("pssuspend.exe", "erl.exe", option="")
+            if suspend_erlang:
+                NodeHelper.log.info("erlang process is suspended")
+            else:
+                NodeHelper.log.error("erlang process failed to suspend")
+        else:
+            copy_server = copy.deepcopy(server)
+            command_1 = "/sbin/iptables -A INPUT -p tcp -i eth0 --dport 1000:65535 -j REJECT"
+            command_2 = "/sbin/iptables -A OUTPUT -p tcp -o eth0 --sport 1000:65535 -j REJECT"
+            command_3 = "/sbin/iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT"
+            if shell.info.distribution_type.lower() in LINUX_DISTRIBUTION_NAME \
+                             and server.ssh_username != "root":
+                copy_server.ssh_username = "root"
+                shell.disconnect()
+                NodeHelper.log.info("=== connect to server with user %s " % copy_server.ssh_username)
+                shell = RemoteMachineShellConnection(copy_server)
+                o, r = shell.execute_command("whoami")
+                shell.log_command_output(o, r)
+            # Reject incoming connections on port 1000->65535
+            o, r = shell.execute_command(command_1)
+            shell.log_command_output(o, r)
+            # Reject outgoing connections on port 1000->65535
+            if bidirectional:
+                o, r = shell.execute_command(command_2)
+                shell.log_command_output(o, r)
+            if xdcr:
+                o, r = shell.execute_command(command_3)
+                shell.log_command_output(o, r)
+            NodeHelper.log.info("enabled firewall on {0}".format(server))
+            o, r = shell.execute_command("/sbin/iptables --list")
+            shell.log_command_output(o, r)
+            shell.disconnect()
+            
     @staticmethod
     def do_a_warm_up(server):
         """Warmp up server
@@ -396,7 +439,7 @@ class node_utils():
         """ Method to start a server which is subject to failover """
         for server in self.servers:
             if server.ip == node.ip:
-                RemoteUtilHelper.enable_firewall(server)
+                NodeHelper.enable_firewall(server)
 
     def stop_firewall_on_node(self, node):
         """ Method to start a server which is subject to failover """

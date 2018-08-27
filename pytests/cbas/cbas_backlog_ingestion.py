@@ -8,6 +8,7 @@ Created on 28-Mar-2018
 import uuid
 import json
 import datetime
+import time
 
 import testconstants
 from couchbase_helper.documentgenerator import DocumentGenerator
@@ -181,10 +182,10 @@ class CBASBacklogIngestion(CBASBaseTest):
 
         self.log.info("Create CBAS buckets")
         num_of_cbas_buckets = self.input.param("num_of_cbas_buckets", 2)
-        for index in range(num_of_cbas_buckets):
-            self.assertTrue(self.cbas_util.create_bucket_on_cbas(cbas_bucket_name=cbas_bucket_name + str(index),
-                                                                 cb_bucket_name=self.cb_bucket_name),
-                            "Failed to create cbas bucket " + self.cbas_bucket_name + str(index))
+#         for index in range(num_of_cbas_buckets):
+#             self.assertTrue(self.cbas_util.create_bucket_on_cbas(cbas_bucket_name=cbas_bucket_name + str(index),
+#                                                                  cb_bucket_name=self.cb_bucket_name),
+#                             "Failed to create cbas bucket " + self.cbas_bucket_name + str(index))
 
         self.log.info("Create data-sets")
         field = self.input.param("where_field", "")
@@ -195,7 +196,7 @@ class CBASBacklogIngestion(CBASBaseTest):
             for join_value in join_values:
                 tmp += join_operator + " `" + field + "`=\"" + join_value + "\""
             tmp = tmp[1:-1]
-            self.assertTrue(self.cbas_util.create_dataset_on_bucket((self.cb_bucket_name + str(index)),
+            self.assertTrue(self.cbas_util.create_dataset_on_bucket(self.cb_bucket_name,
                                                                     cbas_dataset_name=(self.cbas_dataset_name + str(
                                                                         index)),
                                                                     where_field=field, where_value=tmp))
@@ -226,7 +227,7 @@ class CBASBacklogIngestion(CBASBaseTest):
 
 
 class BucketOperations(CBASBaseTest):
-    CBAS_BUCKET_CONNECT_ERROR_MSG = "Maximum number of active writable datasets (8) exceeded"
+    CBAS_BUCKET_CONNECT_ERROR_MSG = 'Connect link failed {\"Default.Local.default\" : \"Maximum number of active writable datasets (8) exceeded\"}'
 
     def setUp(self):
         super(BucketOperations, self).setUp()
@@ -367,19 +368,19 @@ class BucketOperations(CBASBaseTest):
 
         self.log.info("Wait for ingestion to complete and verify count")
         self.cbas_util.wait_for_ingestion_complete([self.dataset_name], self.num_items)
-        self.assertTrue(self.cbas_util.validate_cbas_dataset_items_count(self.dataset_name, 0))
+        self.assertTrue(self.cbas_util.validate_cbas_dataset_items_count(self.dataset_name, self.num_items))
 
         self.log.info("Load back data in the default bucket")
+        self.log.info("Now that the UUID of this new bucet is different hence cbas will not ingest anything from this bucket anymore.")
         self.perform_doc_ops_in_all_cb_buckets(self.num_items, "create", self.num_items, self.num_items * 2)
 
         self.log.info("Wait for ingestion to complete and verify count")
-        self.cbas_util.wait_for_ingestion_complete([self.dataset_name], self.num_items * 2)
-        self.assertTrue(self.cbas_util.validate_cbas_dataset_items_count(self.dataset_name, self.num_items * 2))
+        self.cbas_util.wait_for_ingestion_complete([self.dataset_name], self.num_items)
+        self.assertTrue(self.cbas_util.validate_cbas_dataset_items_count(self.dataset_name, self.num_items))
 
     '''
-    test_create_multiple_cb_cbas_and_datasets,num_of_cb_buckets=8,num_of_cbas_buckets_per_cb_bucket=2,num_of_dataset_per_cbas=8,default_bucket=False,cbas_bucket_prefix=_cbas_bucket_,dataset_prefix=_ds_,items=10
+    test_create_multiple_cb_cbas_and_datasets,num_of_cb_buckets=8,num_of_dataset_per_cbas=8,default_bucket=False,cbas_bucket_prefix=_cbas_bucket_,dataset_prefix=_ds_,items=10
     '''
-
     def test_create_multiple_cb_cbas_and_datasets(self):
 
         self.log.info("Fetch test case arguments")
@@ -389,51 +390,9 @@ class BucketOperations(CBASBaseTest):
         memory_for_kv = int(self.fetch_available_memory_for_kv_on_a_node())
         self.rest.set_service_memoryQuota(service='memoryQuota', memoryQuota=memory_for_kv)
 
-        self.log.info("Create {0} cb buckets".format(self.num_of_cb_buckets))
-        self.create_multiple_buckets(server=self.master, replica=1, howmany=self.num_of_cb_buckets)
-        self.sleep(30, message="Wait for buckets to be ready")
-        
-        self.log.info("Check if buckets are created")
-        bucket_helper = BucketHelper(self.master)
-        buckets = bucket_helper.get_buckets()
-        self.assertEqual(len(buckets), self.num_of_cb_buckets, msg="CB bucket count mismatch")
-
-        self.log.info("Load data in the default bucket")
-        self.perform_doc_ops_in_all_cb_buckets(self.num_items, "create", 0, self.num_items)
-
-        self.log.info("Create connection to all buckets")
-        for bucket in buckets:
-            self.cbas_util.createConn(bucket.name)
-            
-        self.log.info("Create {0} cbas buckets".format(self.num_of_cb_buckets * self.num_of_cbas_buckets_per_cb_bucket))
-        for bucket in buckets:
-            for index in range(self.num_of_cbas_buckets_per_cb_bucket):
-                self.assertTrue(
-                    self.cbas_util.create_bucket_on_cbas(
-                        cbas_bucket_name=bucket.name.replace("-", "_") + self.cbas_bucket_prefix + str(index),
-                        cb_bucket_name=bucket.name),
-                    msg="Failed to create CBAS bucket")
-
-#         self.log.info("Check if cbas buckets are created")
-#         cbas_buckets = []
-#         _, _, _, results, _ = self.cbas_util.execute_statement_on_cbas_util("select Name from Metadata.`Bucket`")
-#         for row in results:
-#             cbas_buckets.append(row['Name'])
-#         self.assertEqual(len(cbas_buckets), self.num_of_cb_buckets * self.num_of_cbas_buckets_per_cb_bucket,
-#                          msg="CBAS bucket count mismatch")
-
-        self.log.info("Create {0} datasets".format(
-            self.num_of_cb_buckets * self.num_of_dataset_per_cbas))
-        for cbas_bucket in buckets:
-            for index in range(self.num_of_dataset_per_cbas):
-                self.assertTrue(self.cbas_util.create_dataset_on_bucket(cbas_bucket_name=cbas_bucket.name,
-                                                                        cbas_dataset_name=
-                                                                        cbas_bucket + self.dataset_prefix + str(index)),
-                                msg="Failed to create dataset {0}".format(self.dataset_name))
-
         self.log.info("Update storageMaxActiveWritableDatasets count")
-        active_data_set_count = self.num_of_cb_buckets * self.num_of_cbas_buckets_per_cb_bucket * self.num_of_dataset_per_cbas
-        update_config_map = {"storageMaxActiveWritableDatasets" : active_data_set_count}
+        active_data_set_count = self.num_of_cb_buckets * self.num_of_dataset_per_cbas
+        update_config_map = {"storageMaxActiveWritableDatasets": active_data_set_count}
         status, _, _ = self.cbas_util.update_service_parameter_configuration_on_cbas(update_config_map)
         self.assertTrue(status, msg="Failed to update config")
 
@@ -441,52 +400,53 @@ class BucketOperations(CBASBaseTest):
         status, _, _ = self.cbas_util.restart_analytics_cluster_uri()
         self.assertTrue(status, msg="Failed to restart cbas")
 
-        self.log.info("Wait for node restart and assert on storageMaxActiveWritableDatasets count")
-        minutes_to_run = self.input.param("minutes_to_run", 1)
-        end_time = datetime.datetime.now() + datetime.timedelta(minutes=int(minutes_to_run))
-        active_dataset = None
-        self.sleep(30, message="wait for server to be up")
-        while datetime.datetime.now() < end_time and active_dataset is None:
+        self.log.info("Wait for request to complete and cluster to be active: Using private ping() function")
+        cluster_recover_start_time = time.time()
+        while time.time() < cluster_recover_start_time + 180:
             try:
-                status, content, response = self.cbas_util.fetch_service_parameter_configuration_on_cbas()
-                print(status, content, response)
-                config_dict = json.loads((content.decode("utf-8")))
-                active_dataset = config_dict['storageMaxActiveWritableDatasets']
-            except Exception:
-                self.sleep(10, message="waiting for server to be up")
+                status, metrics, _, cbas_result, _ = self.cbas_util.execute_statement_on_cbas_util("set `import-private-functions` `true`;ping()")
+                if status == "success":
+                    break
+            except:
+                self.sleep(3, message="Wait for service to up")
+
+        self.log.info("Assert on storageMaxActiveWritableDatasets count")
+        status, content, response = self.cbas_util.fetch_service_parameter_configuration_on_cbas()
+        config_dict = json.loads((content.decode("utf-8")))
+        active_dataset = config_dict['storageMaxActiveWritableDatasets']
         self.assertEqual(active_dataset, active_data_set_count, msg="Value in correct for active dataset count")
 
-        self.log.info("Connect to CBAS buckets and assert document count")
-        for cbas_bucket in buckets:
-            bucket_connect_success = False
-            retry_for_seconds = 300
-            end_time = datetime.datetime.now() + datetime.timedelta(seconds=int(retry_for_seconds))
-            while not bucket_connect_success and datetime.datetime.now() < end_time:
-                try:
-                    self.assertTrue(self.cbas_util.connect_to_bucket(cbas_bucket_name=cbas_bucket.name),
-                                    msg="Failed to connect to cbas bucket")
-                    bucket_connect_success = True
-                except:
-                    self.sleep(10, message="Unable to connect, re-try after 10 seconds")
-            if not bucket_connect_success:
-                self.fail("Unable to connect cbas bucket after 300 seconds")  
-                     
+        self.log.info("Create {0} cb buckets".format(self.num_of_cb_buckets))
+        self.create_multiple_buckets(server=self.master, replica=1, howmany=self.num_of_cb_buckets)
+        self.sleep(30, message="Wait for buckets to be ready")
+
+        self.log.info("Check if buckets are created")
+        bucket_helper = BucketHelper(self.master)
+        kv_buckets = bucket_helper.get_buckets()
+        self.assertEqual(len(kv_buckets), self.num_of_cb_buckets, msg="CB bucket count mismatch")
+
+        self.log.info("Load data in the default bucket")
+        self.perform_doc_ops_in_all_cb_buckets(self.num_items, "create", 0, self.num_items)
+
+        self.log.info("Create connection to all buckets")
+        for bucket in kv_buckets:
+            self.cbas_util.createConn(bucket.name)
+            break
+            
+        self.log.info("Create {0} datasets".format(self.num_of_cb_buckets * self.num_of_dataset_per_cbas))
+        for kv_bucket in kv_buckets:
             for index in range(self.num_of_dataset_per_cbas):
-                self.log.info("Wait for ingestion to complete and verify count")
-                query_passed = False
-                retry_for_seconds = 300
-                end_time = datetime.datetime.now() + datetime.timedelta(seconds=int(retry_for_seconds))
-                while not query_passed and datetime.datetime.now() < end_time:
-                    try:
-                        self.cbas_util.wait_for_ingestion_complete([cbas_bucket.name + self.dataset_prefix + str(index)],
-                                                                   self.num_items)
-                        query_passed = True
-                    except:
-                        self.sleep(10, message="Hit exception while fetching count, re-try after 10 seconds")
-                if not query_passed:
-                    self.fail("Failed to fetch result on server")
+                self.assertTrue(self.cbas_util.create_dataset_on_bucket(kv_bucket.name, kv_bucket.name.replace("-", "_") + self.dataset_prefix + str(index)),
+                                msg="Failed to create dataset {0}".format(self.dataset_name))
+
+        self.log.info("Connect Link")
+        self.assertTrue(self.cbas_util.connect_link(), msg="Failed to connect to cbas bucket")
+
+        self.log.info("Validate document count")
+        for kv_bucket in kv_buckets:
+            for index in range(self.num_of_dataset_per_cbas):
                 self.assertTrue(self.cbas_util.validate_cbas_dataset_items_count(
-                                cbas_bucket.name + self.dataset_prefix + str(index), self.num_items))
+                                kv_bucket.name.replace("-", "_") + self.dataset_prefix + str(index), self.num_items))
                         
     def tearDown(self):
         super(BucketOperations, self).tearDown()

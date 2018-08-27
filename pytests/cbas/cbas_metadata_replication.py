@@ -296,15 +296,15 @@ class MetadataReplication(CBASBaseTest):
         self.ingestion_in_progress()
         
         replicas_before_rebalance=len(self.cbas_util.get_replicas_info(self.shell))
-        self.cbas_util.closeConn()
-        self.cbas_util = cbas_utils(self.master, self.cbas_servers[0])
-        self.cbas_util.createConn("default")
-        self.cbas_node = self.cbas_servers[0]
         
         self.cluster_util.add_node(node=self.cbas_servers[-1],rebalance=False)
         swap_nc = self.input.param('swap_nc', False)
         if not swap_nc:
             out_nodes = [self.otpNodes[0]]
+            self.cbas_util.closeConn()
+            self.cbas_util = cbas_utils(self.master, self.cbas_servers[0])
+            self.cbas_util.createConn("default")
+            self.cbas_node = self.cbas_servers[0]
         else:
             out_nodes = [self.otpNodes[1]]    
         

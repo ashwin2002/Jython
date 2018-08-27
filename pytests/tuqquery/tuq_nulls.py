@@ -356,8 +356,11 @@ class NULLTests(QueryTests):
             expected_result = []
             for doc in self.full_list:
                 if len(doc['story_point']) < 3:
-                    expected_result.append({'feature_name' : doc['feature_name'],
-                                            'point': None})
+                    if not self.analytics:
+                        expected_result.append({'feature_name' : doc['feature_name'],
+                                                'point' : None})
+                    else:
+                        expected_result.append({'feature_name' : doc['feature_name']})
                 else:
                     expected_result.append({'feature_name' : doc['feature_name'],
                                             'point' : doc['story_point'][2]})
@@ -374,8 +377,11 @@ class NULLTests(QueryTests):
             expected_result = []
             for doc in self.full_list:
                 if len(doc['story_point']) < 3:
-                    expected_result.append({'feature_name' : doc['feature_name'],
-                                            'point' : None})
+                    if not self.analytics:
+                        expected_result.append({'feature_name' : doc['feature_name'],
+                                                'point' : None})
+                    else:
+                        expected_result.append({'feature_name' : doc['feature_name']})
                 else:
                     expected_result.append({'feature_name' : doc['feature_name'],
                                             'point' : doc['story_point'][2]})
