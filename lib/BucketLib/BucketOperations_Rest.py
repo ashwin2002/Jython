@@ -282,7 +282,6 @@ class BucketHelper(RestConnection):
         params = urllib.urlencode({})
 
 
-
         # this only works for default bucket ?
         if bucket == 'default':
             init_params = {'name': bucket,

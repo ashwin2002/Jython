@@ -17,7 +17,7 @@ class CBASClusterOperations(CBASBaseTest):
         self.wait_for_rebalance=True
         super(CBASClusterOperations, self).setUp()
         
-        self.create_default_bucket()
+        self.bucket_util.create_default_bucket()
 #         self.cbas_util.createConn("default")
         if 'nodeType' in self.input.test_params:
             self.nodeType = self.input.test_params['nodeType']
@@ -363,7 +363,7 @@ class CBASClusterOperations(CBASBaseTest):
         self.log.info("Run KV ops in async while rebalance is in progress")
         json_generator = JsonGenerator()
         generators = json_generator.generate_docs_simple(docs_per_day=self.num_items, start=0)
-        tasks = self._async_load_all_buckets(self.master, generators, "create", 0)
+        tasks = self.bucket_util._async_load_all_buckets(self.master, generators, "create", 0)
         
         self.log.info("Run concurrent queries to simulate busy system")
         statement = "select sleep(count(*),50000) from {0} where mutated=0;".format(self.cbas_dataset_name)

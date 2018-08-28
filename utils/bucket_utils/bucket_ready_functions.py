@@ -12,7 +12,6 @@ import string
 from subprocess import call
 import time
 import uuid
-
 from BucketLib.BucketOperations import BucketHelper
 from TestInput import TestInputSingleton
 from couchbase_helper.documentgenerator import BlobGenerator
@@ -23,7 +22,7 @@ from lib.mc_bin_client import MemcachedClient
 import logger
 import mc_bin_client
 from membase.api.exception import ServerUnavailableException
-from membase.api.rest_client import RestConnection, Bucket
+from membase.api.rest_client import RestConnection
 from membase.helper.cluster_helper import ClusterOperationHelper
 from membase.helper.rebalance_helper import RebalanceHelper
 import memcacheConstants
@@ -33,75 +32,166 @@ from remote.remote_util import RemoteMachineShellConnection
 from testconstants import MAX_COMPACTION_THRESHOLD
 from testconstants import MIN_COMPACTION_THRESHOLD
 from testconstants import STANDARD_BUCKET_PORT
-
-
+from lib.memcached.helper.kvstore import KVStore
+from lib.couchbase_helper.cluster import Cluster
 log = logger.Logger.get_logger()
 
+"""
+Create a set of bucket_parameters to be sent to all of the bucket_creation methods
+
+Parameters:
+    size - The size of the bucket to be created. (int)
+    enable_replica_index - can be 0 or 1, 1 enables indexing of replica bucket data (int)
+    replicas - The number of replicas for this bucket. (int)
+    eviction_policy - The eviction policy for the bucket (String). Can be
+        ephemeral bucket: noEviction or nruEviction
+        non-ephemeral bucket: valueOnly or fullEviction.
+    bucket_priority - The priority of the bucket:either none, low, or high. (String)
+    bucket_type - The type of bucket. (String)
+    flushEnabled - Enable or Disable the flush functionality of the bucket. (int)
+    lww = determine the conflict resolution type of the bucket. (Boolean)
+"""
+
+class Bucket(object):
+    name = "name"
+    replicas = "replicas"
+    size = "size"
+    type = "type"
+    enable_replica_index = "enable_replica_index"
+    eviction_policy = "eviction_policy"
+    priority = "priority"
+    flush_enabled = "flush_enabled"
+    lww = "lww"
+    maxTTL = "maxTTL"
+    compressionMode = "compressionMode"
+    uuid = "uuid"
+    
+    class bucket_type:
+        MEMBASE = "membase"
+        EPHEMERAL = "ephemeral"
+        MEMCACHED = "memcached"
+    
+    class bucket_eviction_policy:
+        VALUE_ONLY = "valueOnly"
+        FULL_EVICTION = "fullEviction"
+        NO_EVICTION = "noEviction"
+        
+    class bucket_compression_mode:
+        ACTIVE = "active"
+        PASSIVE = "passive"
+        OFF = "off"
+        
+    def __init__(self, new_params={}):
+        self.name = new_params.get(Bucket.name, "default")
+        self.type = new_params.get(Bucket.type, Bucket.bucket_type.MEMBASE)
+        self.replicas = new_params.get(Bucket.replicas, 0)
+        self.size = new_params.get(Bucket.size, 256)
+        self.kvs = {1:KVStore()}
+        self.eviction_policy = new_params.get(Bucket.eviction_policy, Bucket.bucket_eviction_policy.VALUE_ONLY)
+        self.enable_replica_index = new_params.get(Bucket.enable_replica_index, 0)
+        self.priority = new_params.get(Bucket.priority, None)
+        self.uuid = new_params.get(Bucket.uuid, None)
+        self.lww = new_params.get(Bucket.lww, False)
+        self.maxTTL = new_params.get(Bucket.maxTTL, None)
+        self.flush_enabled = new_params.get(Bucket.flush_enabled, 1)
+        self.compressionMode = new_params.get(Bucket.compressionMode, Bucket.bucket_compression_mode.PASSIVE)
+        self.nodes = None
+        self.stats = None
+        self.servers = []
+        self.vbuckets = []
+        self.forward_map = []
+
+    def __str__(self):
+        return self.params['name']
+    
 class bucket_utils():
     def __init__(self, server):
         self.master = server
+        self.server = server
+        self.cluster = Cluster()
         self.rest = RestConnection(server)
         self.input = TestInputSingleton.input
-        self.sdk_compression = self.input.param("sdk_compression", True)
+        self.buckets = []
+        self.default_bucket = self.input.param("default_bucket", True)
+        if self.default_bucket:
+            self.default_bucket_name = "default"
+        self.standard_buckets = self.input.param("standard_buckets", 0)
+        self.sasl_buckets = self.input.param("sasl_buckets", 0)
+        self.memcached_buckets = self.input.param("memcached_buckets", 0)
+        self.num_buckets = self.input.param("num_buckets", 0)
+        self.total_buckets = self.sasl_buckets + self.default_bucket + self.standard_buckets + self.memcached_buckets
+        self.bucket_size = self.input.param("bucket_size", None)
+        self.bucket_type = self.input.param("bucket_type", 'membase')
+        self.num_replicas = self.input.param("replicas", 1)
+        self.enable_replica_index = self.input.param("index_replicas", 1)
+        self.enable_time_sync = self.input.param("enable_time_sync", False)
+        self.eviction_policy = self.input.param("eviction_policy", 'valueOnly')  # or 'fullEviction'
+        # for ephemeral bucket is can be noEviction or nruEviction
+        if self.bucket_type == 'ephemeral' and self.eviction_policy == 'valueOnly':
+            # use the ephemeral bucket default
+            self.eviction_policy = 'noEviction'
         
-    def _create_bucket_params(self, server, replicas=1, size=0, port=11211, password=None,
-                              bucket_type='membase', enable_replica_index=1, eviction_policy='valueOnly',
-                              bucket_priority=None, flush_enabled=1, lww=False, maxttl=None,
-                              compression_mode='passive'):
-        """Create a set of bucket_parameters to be sent to all of the bucket_creation methods
-        Parameters:
-            server - The server to create the bucket on. (TestInputServer)
-            port - The port to create this bucket on. (String)
-            password - The password for this bucket. (String)
-            size - The size of the bucket to be created. (int)
-            enable_replica_index - can be 0 or 1, 1 enables indexing of replica bucket data (int)
-            replicas - The number of replicas for this bucket. (int)
-            eviction_policy - The eviction policy for the bucket (String). Can be
-                ephemeral bucket: noEviction or nruEviction
-                non-ephemeral bucket: valueOnly or fullEviction.
-            bucket_priority - The priority of the bucket:either none, low, or high. (String)
-            bucket_type - The type of bucket. (String)
-            flushEnabled - Enable or Disable the flush functionality of the bucket. (int)
-            lww = determine the conflict resolution type of the bucket. (Boolean)
-
-        Returns:
-            bucket_params - A dictionary containing the parameters needed to create a bucket."""
-
-
-        bucket_params = {}
-        bucket_params['server'] = server
-        bucket_params['replicas'] = replicas
-        bucket_params['size'] = size
-        bucket_params['port'] = port
-        bucket_params['password'] = password
-        bucket_params['bucket_type'] = bucket_type
-        bucket_params['enable_replica_index'] = enable_replica_index
-        bucket_params['eviction_policy'] = eviction_policy
-        bucket_params['bucket_priority'] = bucket_priority
-        bucket_params['flush_enabled'] = flush_enabled
-        bucket_params['lww'] = lww
-        bucket_params['maxTTL'] = maxttl
-        bucket_params['compressionMode'] = compression_mode
-
-        return bucket_params
-
+        self.lww = self.input.param("lww", False)  # only applies to LWW but is here because the bucket is created here
+        self.maxttl = self.input.param("maxttl", None)
+        self.compression_mode = self.input.param("compression_mode", 'passive')
+        self.sdk_compression = self.input.param("sdk_compression", True)
+        self.sasl_bucket_name = "bucket"
+        self.sasl_bucket_priority = self.input.param("sasl_bucket_priority", None)
+        if self.sasl_bucket_priority is not None:
+            self.sasl_bucket_priority = self.sasl_bucket_priority.split(":")
+        self.standard_bucket_priority = self.input.param("standard_bucket_priority", None)
+        if self.standard_bucket_priority is not None:
+            self.standard_bucket_priority = self.standard_bucket_priority.split(":")
+        self.skip_init_check_cbserver = self.input.param("skip_init_check_cbserver", False)
+        self.dgm_run = self.input.param("dgm_run", False)
+        if self.dgm_run:
+                self.quota = 256
+        
+        if self.total_buckets > 10:
+            log.info("================== changing max buckets from 10 to {0} =================" \
+                          .format(self.total_buckets))
+            self.change_max_buckets(self, self.total_buckets)
+        if self.total_buckets > 0 and not self.skip_init_check_cbserver:
+            """ from sherlock, we have index service that could take some
+                RAM quota from total RAM quota for couchbase server.  We need
+                to get the correct RAM quota available to create bucket(s)
+                after all services were set """
+            node_info = RestConnection(self.master).get_nodes_self()
+            if node_info.memoryQuota and int(node_info.memoryQuota) > 0:
+                ram_available = node_info.memoryQuota
+            else:
+                ram_available = self.quota
+            if self.bucket_size is None:
+                if self.dgm_run:
+                    """ if dgm is set,
+                        we need to set bucket size to dgm setting """
+                    self.bucket_size = self.quota
+                else:
+                    self.bucket_size = self._get_bucket_size(ram_available, \
+                                                             self.total_buckets)
+                    
+    def change_max_buckets(self, total_buckets):
+        command = "curl -X POST -u {0}:{1} -d maxBucketCount={2} http://{3}:{4}/internalSettings".format \
+            (self.server.rest_username,
+             self.server.rest_password,
+             total_buckets,
+             self.server.ip,
+             self.server.port)
+        shell = RemoteMachineShellConnection(self.server)
+        output, error = shell.execute_command_raw(command)
+        shell.log_command_output(output, error)
+        shell.disconnect()
+        
     def _bucket_creation(self):
         if self.default_bucket:
-
-            default_params=self._create_bucket_params(server=self.master, size=self.bucket_size,
-                                                             replicas=self.num_replicas, bucket_type=self.bucket_type,
-                                                             enable_replica_index=self.enable_replica_index,
-                                                             eviction_policy=self.eviction_policy, lww=self.lww,
-                                                             maxttl=self.maxttl, compression_mode=self.compression_mode)
-            self.cluster.create_default_bucket(default_params)
-            self.buckets.append(Bucket(name="default", authType="sasl", saslPassword="",
-                                       num_replicas=self.num_replicas, bucket_size=self.bucket_size,
-                                       eviction_policy=self.eviction_policy, lww=self.lww,
-                                       type=self.bucket_type,maxttl=self.maxttl, compression_mode=self.compression_mode))
+            default_bucket = Bucket({Bucket.name:"default", Bucket.size:self.bucket_size})
+            self.cluster.create_default_bucket(default_bucket.__dict__)
+            
+            self.buckets.append(default_bucket)
+            
             if self.enable_time_sync:
-                self._set_time_sync_on_buckets( ['default'] )
+                self._set_time_sync_on_buckets([default_bucket.name])
 
-        self._create_sasl_buckets(self.master, self.sasl_buckets)
         self._create_standard_buckets(self.master, self.standard_buckets)
         self._create_memcached_buckets(self.master, self.memcached_buckets)
 
@@ -138,96 +228,58 @@ class bucket_utils():
         bucket_info = self.get_bucket_json(bucket=bucket)
         return bucket_info['compressionMode']
 
-    def _create_sasl_buckets(self, server, num_buckets, server_id=None, bucket_size=None, password='password'):
-        if not num_buckets:
-            return
-        if server_id is None:
-            server_id = RestConnection(server).get_nodes_self().id
-        if bucket_size is None:
-            bucket_size = self.bucket_size
-        bucket_tasks = []
-
-        bucket_params = copy.deepcopy(self.bucket_base_params['membase']['non_ephemeral'])
-        bucket_params['size'] = bucket_size
-        bucket_params['bucket_type'] = self.bucket_type
-
-        for i in range(num_buckets):
-            name = self.sasl_bucket_name + str(i)
-            bucket_priority = None
-            if self.sasl_bucket_priority is not None:
-                bucket_priority = self.get_bucket_priority(self.sasl_bucket_priority[i])
-            bucket_params['bucket_priority'] = bucket_priority
-
-            bucket_tasks.append(self.cluster.async_create_sasl_bucket(name=name, password=self.sasl_password,
-                                                                      bucket_params=bucket_params))
-            self.buckets.append(Bucket(name=name, authType="sasl", saslPassword=self.sasl_password,
-                                       num_replicas=self.num_replicas, bucket_size=self.bucket_size,
-                                       master_id=server_id, eviction_policy=self.eviction_policy, lww=self.lww,
-                                       maxttl=self.maxttl, compression_mode=self.compression_mode))
-        for task in bucket_tasks:
-            task.result(self.wait_timeout * 10)
-        if self.enable_time_sync:
-            self._set_time_sync_on_buckets(['bucket' + str(i) for i in range(num_buckets)])
-
     def create_default_bucket(self):
         node_info = self.rest.get_nodes_self()
         if node_info.memoryQuota and int(node_info.memoryQuota) > 0 :
             ram_available = node_info.memoryQuota
             
         self.bucket_size = ram_available - 1
-        default_params=self._create_bucket_params(server=self.master, size=self.bucket_size,
-                                                         replicas=self.num_replicas, bucket_type=self.bucket_type,
-                                                         enable_replica_index=self.enable_replica_index,
-                                                         eviction_policy=self.eviction_policy, lww=self.lww, 
-                                                         maxttl=self.maxttl, compression_mode=self.compression_mode)
-        self.cluster.create_default_bucket(default_params)
-        self.buckets.append(Bucket(name="default", authType="sasl", saslPassword="",
-                                   num_replicas=self.num_replicas, bucket_size=self.bucket_size,
-                                   eviction_policy=self.eviction_policy, lww=self.lww,
-                                   type=self.bucket_type,maxttl=self.maxttl, compression_mode=self.compression_mode))
-        if self.enable_time_sync:
-            self._set_time_sync_on_buckets( ['default'] )
-
-    def create_bucket(self, serverInfo, name='default', replica=1, port=11210, test_case=None, bucket_ram=-1, password=None):
-        log = logger.Logger.get_logger()
-        rest = RestConnection(serverInfo)
-        bucket_conn = BucketHelper(serverInfo)
-        if bucket_ram < 0:
-            info = rest.get_nodes_self()
-            bucket_ram = info.memoryQuota * 2 / 3
-
-        if password == None:
-            authType = "sasl"
-        else:
-            authType = "none"
-
-        bucket_conn.create_bucket(bucket=name,
-                           ramQuotaMB=bucket_ram,
-                           replicaNumber=replica,
-                           proxyPort=port,
-                           authType=authType,
-                           saslPassword=password,
-                           maxTTL=self.maxttl, compressionMode=self.compression_mode)
-        msg = 'create_bucket succeeded but bucket "{0}" does not exist'
-        bucket_created = self.wait_for_bucket_creation(name, bucket_conn)
-        if not bucket_created:
-            log.error(msg)
-            if test_case:
-                test_case.fail(msg=msg.format(name))
+        default_bucket = Bucket({Bucket.size:self.bucket_size})
+        self.cluster.create_bucket(self.server, default_bucket.__dict__)
+        self.buckets.append(default_bucket)
         
-        if bucket_created:      
-            self.buckets.append(Bucket(name=name, authType="sasl", saslPassword="",
-                                num_replicas=self.num_replicas, bucket_size=self.bucket_size,
-                                eviction_policy=self.eviction_policy, lww=self.lww,
-                                type=self.bucket_type,
-                                maxttl=self.maxttl, compression_mode=self.compression_mode))
-        return bucket_created
+        if self.enable_time_sync:
+            self._set_time_sync_on_buckets([default_bucket.Bucket.name])
+
+#     def create_bucket(self, serverInfo, name='default', replica=1, port=11210, test_case=None, bucket_ram=-1, password=None):
+#         log = logger.Logger.get_logger()
+#         rest = RestConnection(serverInfo)
+#         bucket_conn = BucketHelper(serverInfo)
+#         if bucket_ram < 0:
+#             info = rest.get_nodes_self()
+#             bucket_ram = info.memoryQuota * 2 / 3
+# 
+#         if password == None:
+#             authType = "sasl"
+#         else:
+#             authType = "none"
+# 
+#         bucket_conn.create_bucket(bucket=name,
+#                            ramQuotaMB=bucket_ram,
+#                            replicaNumber=replica,
+#                            proxyPort=port,
+#                            authType=authType,
+#                            saslPassword=password,
+#                            maxTTL=self.maxttl, compressionMode=self.compression_mode)
+#         msg = 'create_bucket succeeded but bucket "{0}" does not exist'
+#         bucket_created = self.wait_for_bucket_creation(name, bucket_conn)
+#         if not bucket_created:
+#             log.error(msg)
+#             if test_case:
+#                 test_case.fail(msg=msg.format(name))
+#         
+#         if bucket_created:      
+#             self.buckets.append(Bucket(name=name, authType="sasl", saslPassword="",
+#                                 num_replicas=self.num_replicas, bucket_size=self.bucket_size,
+#                                 eviction_policy=self.eviction_policy, lww=self.lww,
+#                                 type=self.bucket_type,
+#                                 maxttl=self.maxttl, compression_mode=self.compression_mode))
+#         return bucket_created
     
     def create_multiple_buckets(self, server, replica, bucket_ram_ratio=(2.0 / 3.0),
                                 howmany=3, sasl=True, saslPassword='password',
                                 bucketType='membase', evictionPolicy='valueOnly'):
         success = True
-        log = logger.Logger.get_logger()
         rest = RestConnection(server)
         bucket_conn = BucketHelper(server)
         info = rest.get_nodes_self()
@@ -283,79 +335,22 @@ class bucket_utils():
             bucket_size = self.bucket_size
         bucket_tasks = []
 
-        bucket_params = copy.deepcopy(self.bucket_base_params['membase']['non_ephemeral'])
-        bucket_params['size'] = bucket_size
-        bucket_params['bucket_type'] = self.bucket_type
-
-        versions = RestConnection(server).get_nodes_versions()
-        pre_spock = False
-        for version in versions:
-            if "5" > version:
-                pre_spock = True
-
         for i in range(num_buckets):
             name = 'standard_bucket' + str(i)
-            port = STANDARD_BUCKET_PORT + i + 1
-            if pre_spock:
-                bucket_params['proxyPort'] = port
             bucket_priority = None
             if self.standard_bucket_priority is not None:
                 bucket_priority = self.get_bucket_priority(self.standard_bucket_priority[i])
 
-            bucket_params['bucket_priority'] = bucket_priority
-            bucket_tasks.append(self.cluster.async_create_standard_bucket(name=name, port=port,
-                                                                          bucket_params=bucket_params))
-            self.buckets.append(Bucket(name=name, authType=None, saslPassword=None,
-                                       num_replicas=self.num_replicas,
-                                       bucket_size=self.bucket_size,
-                                       port=port, master_id=server_id,
-                                       eviction_policy=self.eviction_policy, lww=self.lww,
-                                       maxttl=self.maxttl, compression_mode=self.compression_mode))
+            bucket = Bucket({Bucket.name:name, Bucket.priority:bucket_priority})
+            
+            bucket_tasks.append(self.cluster.async_create_bucket(bucket.__dict__))
+            self.buckets.append(bucket)
 
         for task in bucket_tasks:
             task.get_result(self.wait_timeout * 10)
 
         if self.enable_time_sync:
             self._set_time_sync_on_buckets(['standard_bucket' + str(i) for i in range(num_buckets)])
-
-    def _create_buckets(self, server, bucket_list, server_id=None, bucket_size=None):
-        if server_id is None:
-            server_id = RestConnection(server).get_nodes_self().id
-        if bucket_size is None:
-            bucket_size = self._get_bucket_size(self.quota, len(bucket_list))
-        bucket_tasks = []
-        if self.parallelism:
-            i = random.randint(1, 10000)
-        else:
-            i = 0
-
-        standard_params = self._create_bucket_params(server=server, size=bucket_size,
-                                                     replicas=self.num_replicas, bucket_type=self.bucket_type,
-                                                     enable_replica_index=self.enable_replica_index,
-                                                     eviction_policy=self.eviction_policy, lww=self.lww,
-                                                     maxttl=self.maxttl, compression_mode=self.compression_mode)
-
-        for bucket_name in bucket_list:
-            self.log.info(" Creating bucket {0}".format(bucket_name))
-            i += 1
-            bucket_priority = None
-            if self.standard_bucket_priority is not None:
-                bucket_priority = self.get_bucket_priority(self.standard_bucket_priority[i])
-
-            standard_params['bucket_priority']=bucket_priority
-            bucket_tasks.append(self.cluster.async_create_standard_bucket(name=bucket_name,port=STANDARD_BUCKET_PORT+i,
-                                                                          bucket_params=standard_params))
-            self.buckets.append(Bucket(name=bucket_name, authType=None, saslPassword=None,
-                                       num_replicas=self.num_replicas,
-                                       bucket_size=bucket_size,
-                                       port=STANDARD_BUCKET_PORT + i, master_id=server_id,
-                                       eviction_policy=self.eviction_policy, type=self.bucket_type,
-                                       maxttl=self.maxttl, compression_mode=self.compression_mode));
-        for task in bucket_tasks:
-            task.result(self.wait_timeout * 10)
-
-        if self.enable_time_sync:
-            self._set_time_sync_on_bucket( bucket_list )
 
     def _create_memcached_buckets(self, server, num_buckets, server_id=None, bucket_size=None):
         if not num_buckets:
@@ -369,27 +364,11 @@ class bucket_utils():
         bucket_params = copy.deepcopy(self.bucket_base_params['memcached'])
         bucket_params['size'] = bucket_size
 
-        versions = RestConnection(server).get_nodes_versions()
-        pre_spock = False
-        for version in versions:
-            if "5" > version:
-                pre_spock = True
-
         for i in range(num_buckets):
-
             name = 'memcached_bucket' + str(i)
-            port = STANDARD_BUCKET_PORT + self.standard_buckets + 2 + i
-
-            if pre_spock:
-                bucket_params['proxyPort'] = port
-
-            bucket_tasks.append(self.cluster.async_create_memcached_bucket(name=name, port=port,
-                                                                           bucket_params=bucket_params))
-            self.buckets.append(Bucket(name=name, authType=None, saslPassword=None,
-                                       num_replicas=self.num_replicas,
-                                       bucket_size=bucket_size, port=port,
-                                       master_id=server_id, type='memcached',
-                                       maxttl=self.maxttl, compression_mode=self.compression_mode));
+            bucket = Bucket({Bucket.name:name,Bucket.type:Bucket.bucket_type.MEMCACHED})
+            bucket_tasks.append(self.cluster.async_create_bucket(bucket_params=bucket_params))
+            self.buckets.append(bucket);
         for task in bucket_tasks:
             task.result()
 
@@ -409,7 +388,11 @@ class bucket_utils():
 
         for task in flush_tasks:
             task.result()
-
+            
+            
+    '''
+        THIS FUNCTION NEEDS TO BE CHANGED COMPLETELY BECUASE WE ARE NOT SAVING DOCS IN KVSTORE ANYMORE.
+    '''
     def _verify_stats_all_buckets(self, servers, master=None, timeout=60):
         stats_tasks = []
         if not master:
@@ -417,7 +400,7 @@ class bucket_utils():
         servers = self.get_kv_nodes(servers, master)
         for bucket in self.buckets:
             items = sum([len(kv_store) for kv_store in bucket.kvs.values()])
-            if bucket.type == 'memcached':
+            if bucket.params.type == 'memcached':
                 items_actual = 0
                 for server in servers:
                     client = MemcachedClientHelper.direct_client(server, bucket)
@@ -476,7 +459,7 @@ class bucket_utils():
             gen = copy.deepcopy(kv_gen)
             if bucket.type != 'memcached':
 #                 tasks.append(self.cluster.async_load_gen_docs_java(server, bucket.name, gen.start,gen.end-gen.start))
-                self.log.info("BATCH SIZE for documents load: %s" % batch_size)
+                log.info("BATCH SIZE for documents load: %s" % batch_size)
                 tasks.append(self.cluster.async_load_gen_docs(server, bucket.name, gen,
                                                               bucket.kvs[kv_store],
                                                               op_type, exp, flag, only_store_hash,
@@ -552,7 +535,7 @@ class bucket_utils():
     def _async_load_bucket(self, bucket, server, kv_gen, op_type, exp, kv_store=1, flag=0, only_store_hash=True,
                            batch_size=1000, pause_secs=1, timeout_secs=30):
         gen = copy.deepcopy(kv_gen)
-        task = self.cluster.async_load_gen_docs(server, bucket.name, gen,
+        task = self.cluster.async_load_gen_docs(server, bucket.param.name, gen,
                                                 bucket.kvs[kv_store], op_type,
                                                 exp, flag, only_store_hash,
                                                 batch_size, pause_secs, timeout_secs,
@@ -621,7 +604,7 @@ class bucket_utils():
         servers = self.get_kv_nodes(servers)
         for server in servers:
             for bucket in self.buckets:
-                if bucket.type == 'memcached':
+                if bucket.params.type == 'memcached':
                     continue
                 tasks.append(self.cluster.async_wait_for_stats([server], bucket, '',
                                                                'ep_queue_size', ep_queue_size_cond, ep_queue_size))
@@ -668,7 +651,7 @@ class bucket_utils():
         if len(self.buckets) > 1:
             batch_size = 1
         for bucket in self.buckets:
-            if bucket.type == 'memcached':
+            if bucket.params.type == 'memcached':
                 continue
             tasks.append(self.cluster.async_verify_data(server, bucket, bucket.kvs[kv_store], max_verify,
                                                         only_store_hash, batch_size, replica_to_read,

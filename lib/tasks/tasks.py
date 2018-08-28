@@ -284,15 +284,13 @@ class NodeInitializeTask(Task):
         self.set_result(self.quota)
 
 class BucketCreateTask(Task):
-    def __init__(self, bucket_params, task_manager):
+    def __init__(self, server, bucket_params, task_manager):
         Task.__init__(self, "bucket_create_task", task_manager=task_manager)
-        self.server = bucket_params['server']
-        self.bucket = bucket_params['bucket_name']
+        self.server = server
+        self.bucket = bucket_params['name']
         self.replicas = bucket_params['replicas']
-        self.port = bucket_params['port']
         self.size = bucket_params['size']
-        self.password = bucket_params['password']
-        self.bucket_type = bucket_params['bucket_type']
+        self.bucket_type = bucket_params['type']
         self.enable_replica_index = bucket_params['enable_replica_index']
         self.eviction_policy = bucket_params['eviction_policy']
         self.lww = bucket_params['lww']
@@ -307,7 +305,7 @@ class BucketCreateTask(Task):
             self.compressionMode = 'passive'
             
         self.flush_enabled = bucket_params['flush_enabled']
-        if bucket_params['bucket_priority'] is None or bucket_params['bucket_priority'].lower() is 'low':
+        if bucket_params['priority'] is None or bucket_params['priority'].lower() is 'low':
             self.bucket_priority = 3
         else:
             self.bucket_priority = 8
@@ -323,8 +321,6 @@ class BucketCreateTask(Task):
 
         if self.size <= 0:
             self.size = info.memoryQuota * 2 / 3
-
-        authType = 'none' if self.password is None else 'sasl'
 
         if int(info.port) in xrange(9091, 9991):
             try:
@@ -343,9 +339,6 @@ class BucketCreateTask(Task):
                 BucketHelper(self.server).create_bucket(bucket=self.bucket,
                                ramQuotaMB=self.size,
                                replicaNumber=self.replicas,
-                               proxyPort=self.port,
-                               authType=authType,
-                               saslPassword=self.password,
                                bucketType=self.bucket_type,
                                replica_index=self.enable_replica_index,
                                flushEnabled=self.flush_enabled,
@@ -358,9 +351,6 @@ class BucketCreateTask(Task):
                 BucketHelper(self.server).create_bucket(bucket=self.bucket,
                                ramQuotaMB=self.size,
                                replicaNumber=self.replicas,
-                               proxyPort=self.port,
-                               authType=authType,
-                               saslPassword=self.password,
                                bucketType=self.bucket_type,
                                replica_index=self.enable_replica_index,
                                flushEnabled=self.flush_enabled,
