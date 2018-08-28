@@ -6,7 +6,10 @@ from couchbase_helper.tuq_generators import JsonGenerator
 from lib.memcached.helper.data_helper import MemcachedClientHelper
 from lib.remote.remote_util import RemoteMachineShellConnection
 from bucket_utils.bucket_ready_functions import bucket_utils
+from Jython_tasks.task import rebalanceTask, DocloaderTask
+from Jython_tasks.task_manager import TaskManager
 from sdk_client import SDKClient
+from com.couchbase.client.java import *;
 
 class CBASClusterOperations(CBASBaseTest):
     def setUp(self):
@@ -35,6 +38,8 @@ class CBASClusterOperations(CBASBaseTest):
             
         self.assertTrue(len(self.rebalanceServers)>1, "Not enough %s servers to run tests."%self.rebalanceServers)
         self.log.info("This test will be running in %s context."%self.nodeType)
+        self.task_manager = TaskManager()
+        self.load_gen_tasks = []
         
     def setup_for_test(self, skip_data_loading=False):
         if not skip_data_loading:
@@ -377,6 +382,58 @@ class CBASClusterOperations(CBASBaseTest):
         for task in tasks:
             task.get_result()
         
+        self.log.info("Log concurrent query status")
+        self.cbas_util.log_concurrent_query_outcome(self.master, handles)
+
+        if not self.cbas_util.validate_cbas_dataset_items_count(self.cbas_dataset_name, self.num_items, 0):
+            self.fail("No. of items in CBAS dataset do not match that in the CB bucket")
+
+    def _start_load_gen(self, docs, bucket, num_executors):
+        cluster = CouchbaseCluster.create(self.servers[0].ip);
+        cluster.authenticate("Administrator","password")
+        bucket = cluster.openBucket(bucket);
+        k = "rebalance"
+        v = {"value": "asd"}
+        docloaders=[]
+        total_num_executors = num_executors
+        num_docs = docs/total_num_executors
+        load_gen_task_name = "Loadgen"
+        for i in xrange(total_num_executors):
+            task_name = "{0}_{1}".format(load_gen_task_name, i)
+            self.load_gen_tasks.append(DocloaderTask(bucket, num_docs, i*num_docs, k, v, task_name))
+        for task in self.load_gen_tasks:
+            self.task_manager.add_new_task(task)
+
+    def _finish_load_gen(self):
+        for task in self.load_gen_tasks:
+            self.log.info(self.task_manager.get_task_result(task))
+
+    def test_rebalance_in_multiple_cbas_on_a_busy_system_jython(self):
+        services = []
+        services.append(self.input.param('service',"cbas"))
+        services.append(self.input.param('service','cbas'))
+        self.log.info("Setup CBAS")
+        self.setup_for_test(skip_data_loading=True)
+        self.log.info("Run KV ops in background")
+        num_executors = 9 // self.buckets.__len__()
+        for bucket in self.buckets:
+            self._start_load_gen(self.num_items, bucket.name, num_executors)
+
+        self.log.info("Run concurrent queries to simulate busy system")
+        statement = "select sleep(count(*),50000) from {0} where mutated=0;".format(self.cbas_dataset_name)
+        handles = self.cbas_util._run_concurrent_queries(statement, self.mode, self.num_concurrent_queries)
+
+        self.log.info("Rebalance in CBAS nodes")
+        nodes_in = [self.rebalanceServers[1], self.rebalanceServers[3]]
+        rebalance_task = rebalanceTask(self.servers[:2], to_add=nodes_in, to_remove=[], services=services)
+        self.task_manager.add_new_task(rebalance_task)
+
+        rebalance_result = self.task_manager.get_task_result(rebalance_task)
+        self.log.info(rebalance_result)
+
+        self.log.info("Get KV ops result")
+        self._finish_load_gen()
+
         self.log.info("Log concurrent query status")
         self.cbas_util.log_concurrent_query_outcome(self.master, handles)
 
