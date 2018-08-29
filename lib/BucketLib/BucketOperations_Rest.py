@@ -264,14 +264,14 @@ class BucketHelper(RestConnection):
     def create_bucket(self, bucket_params={}):
 
         api = '{0}{1}'.format(self.baseUrl, 'pools/default/buckets')
-        init_params = {'name': bucket_params.get('name','default'),
-                       'ramQuotaMB': bucket_params.get('size',256),
-                       'replicaNumber': bucket_params.get('replicas',1),
-                       'bucketType': bucket_params.get('type','membase'),
-                       'replicaIndex': bucket_params.get('replica_index',1),
+        init_params = {'name': bucket_params.get('name'),
+                       'ramQuotaMB': bucket_params.get('size'),
+                       'replicaNumber': bucket_params.get('replicas'),
+                       'bucketType': bucket_params.get('type'),
+                       'replicaIndex': bucket_params.get('enable_replica_index'),
                        'threadsNumber': bucket_params.get('threadsNumber'),
-                       'flushEnabled': bucket_params.get('flushEnabled',1),
-                       'evictionPolicy': bucket_params.get('evictionPolicy','valueOnly'),
+                       'flushEnabled': bucket_params.get('flushEnabled'),
+                       'evictionPolicy': bucket_params.get('evictionPolicy'),
                        'compressionMode': bucket_params.get('compressionMode')}
                             
         if bucket_params.get('lww'):

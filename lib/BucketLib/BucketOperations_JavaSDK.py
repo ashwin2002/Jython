@@ -68,38 +68,24 @@ class BucketHelper(bucket_helper_rest, SDKClient):
             self.disconnectCluster()
             return False
         
-    def create_bucket(self, bucket='',
-                      ramQuotaMB=1,
-                      authType='none',
-                      saslPassword='',
-                      replicaNumber=1,
-                      proxyPort=11211,
-                      bucketType='membase',
-                      replica_index=1,
-                      threadsNumber=3,
-                      flushEnabled=1,
-                      evictionPolicy='valueOnly',
-                      lww=False,
-                      maxTTL=None,
-                      compressionMode=None):
+    def create_bucket(self, bucket_params={}):
         log.info("Connecting Cluster")
         self.connectCluster()        
         try:
             bucketSettings = DefaultBucketSettings.builder()
             
-            if bucketType == "memcached":
+            if bucket_params.get('type') == "memcached":
                 bucketSettings.type(BucketType.MEMCACHED)
-            elif bucketType == "ephemeral":
+            elif bucket_params.get('type') == "ephemeral":
                 bucketSettings.type(BucketType.EPHEMERAL)
             else:
                 bucketSettings.type(BucketType.COUCHBASE)
                 
-            bucketSettings.password(saslPassword)
-            bucketSettings.replicas(replicaNumber)
-            bucketSettings.name(bucket)
-            bucketSettings.quota(ramQuotaMB)
-            bucketSettings.enableFlush(flushEnabled)
-            bucketSettings.indexReplicas(replica_index)
+            bucketSettings.replicas(bucket_params.get('replicas'))
+            bucketSettings.name(bucket_params.get('name'))
+            bucketSettings.quota(bucket_params.get('size'))
+            bucketSettings.enableFlush(bucket_params.get('flushEnabled'))
+            bucketSettings.indexReplicas(bucket_params.get('enable_replica_index'))
             bucketSettings.build()
             self.clusterManager.insertBucket(bucketSettings)
             log.info("Disconnecting Cluster")
