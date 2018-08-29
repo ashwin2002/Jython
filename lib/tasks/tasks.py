@@ -287,24 +287,25 @@ class BucketCreateTask(Task):
     def __init__(self, server, bucket_params, task_manager):
         Task.__init__(self, "bucket_create_task", task_manager=task_manager)
         self.server = server
-        self.bucket = bucket_params['name']
-        self.replicas = bucket_params['replicas']
-        self.size = bucket_params['size']
-        self.bucket_type = bucket_params['type']
-        self.enable_replica_index = bucket_params['enable_replica_index']
-        self.eviction_policy = bucket_params['eviction_policy']
-        self.lww = bucket_params['lww']
+        self.bucket_params = bucket_params
+#         self.bucket = bucket_params['name']
+#         self.replicas = bucket_params['replicas']
+#         self.size = bucket_params['size']
+#         self.bucket_type = bucket_params['type']
+#         self.enable_replica_index = bucket_params['enable_replica_index']
+#         self.eviction_policy = bucket_params['eviction_policy']
+#         self.lww = bucket_params['lww']
         
-        if 'maxTTL' in bucket_params:
-            self.maxttl = bucket_params['maxTTL']
-        else:
-            self.maxttl = 0
-        if 'compressionMode' in bucket_params:
-            self.compressionMode = bucket_params['compressionMode']
-        else:
-            self.compressionMode = 'passive'
-            
-        self.flush_enabled = bucket_params['flush_enabled']
+#         if 'maxTTL' in bucket_params:
+#             self.maxttl = bucket_params['maxTTL']
+#         else:
+#             self.maxttl = 0
+#         if 'compressionMode' in bucket_params:
+#             self.compressionMode = bucket_params['compressionMode']
+#         else:
+#             self.compressionMode = 'passive'
+#             
+#         self.flush_enabled = bucket_params['flush_enabled']
         if bucket_params['priority'] is None or bucket_params['priority'].lower() is 'low':
             self.bucket_priority = 3
         else:
@@ -319,45 +320,47 @@ class BucketCreateTask(Task):
                 return
         info = rest.get_nodes_self()
 
-        if self.size <= 0:
+        if self.bucket_params['size'] <= 0:
             self.size = info.memoryQuota * 2 / 3
 
-        if int(info.port) in xrange(9091, 9991):
-            try:
-                self.port = info.port
-                BucketHelper(self.server).create_bucket(bucket=self.bucket)
-                self.state = CHECKING
-                self.call()
-            except Exception as e:
-                log.info(str(e))
-                self.state = FINISHED
-                #self. set_unexpected_exception(e)
-            return
+#         if int(info.port) in xrange(9091, 9991):
+#             try:
+#                 self.port = info.port
+#                 BucketHelper(self.server).create_bucket(bucket=self.bucket)
+#                 self.state = CHECKING
+#                 self.call()
+#             except Exception as e:
+#                 log.info(str(e))
+#                 self.state = FINISHED
+#                 #self. set_unexpected_exception(e)
+#             return
         version = rest.get_nodes_self().version
         try:
             if float(version[:2]) >= 3.0 and self.bucket_priority is not None:
-                BucketHelper(self.server).create_bucket(bucket=self.bucket,
-                               ramQuotaMB=self.size,
-                               replicaNumber=self.replicas,
-                               bucketType=self.bucket_type,
-                               replica_index=self.enable_replica_index,
-                               flushEnabled=self.flush_enabled,
-                               evictionPolicy=self.eviction_policy,
-                               threadsNumber=self.bucket_priority,
-                               lww=self.lww,
-                               maxTTL=self.maxttl,
-                               compressionMode=self.compressionMode)
-            else:
-                BucketHelper(self.server).create_bucket(bucket=self.bucket,
-                               ramQuotaMB=self.size,
-                               replicaNumber=self.replicas,
-                               bucketType=self.bucket_type,
-                               replica_index=self.enable_replica_index,
-                               flushEnabled=self.flush_enabled,
-                               evictionPolicy=self.eviction_policy,
-                               lww=self.lww,
-                               maxTTL=self.maxttl,
-                               compressionMode=self.compressionMode)
+                self.bucket_params.update({"threadsNumber":self.bucket_priority})
+#                 BucketHelper(self.server).create_bucket(bucket=self.bucket,
+#                                ramQuotaMB=self.size,
+#                                replicaNumber=self.replicas,
+#                                bucketType=self.bucket_type,
+#                                replica_index=self.enable_replica_index,
+#                                flushEnabled=self.flush_enabled,
+#                                evictionPolicy=self.eviction_policy,
+#                                threadsNumber=self.bucket_priority,
+#                                lww=self.lww,
+#                                maxTTL=self.maxttl,
+#                                compressionMode=self.compressionMode)
+#             else:
+#                 BucketHelper(self.server).create_bucket(bucket=self.bucket,
+#                                ramQuotaMB=self.size,
+#                                replicaNumber=self.replicas,
+#                                bucketType=self.bucket_type,
+#                                replica_index=self.enable_replica_index,
+#                                flushEnabled=self.flush_enabled,
+#                                evictionPolicy=self.eviction_policy,
+#                                lww=self.lww,
+#                                maxTTL=self.maxttl,
+#                                compressionMode=self.compressionMode)
+            BucketHelper(self.server).create_bucket(self.bucket_params)
             self.state = CHECKING
             self.call()
 

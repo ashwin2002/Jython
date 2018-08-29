@@ -31,7 +31,6 @@ from memcached.helper.data_helper import VBucketAwareMemcached
 from remote.remote_util import RemoteMachineShellConnection
 from testconstants import MAX_COMPACTION_THRESHOLD
 from testconstants import MIN_COMPACTION_THRESHOLD
-from testconstants import STANDARD_BUCKET_PORT
 from lib.memcached.helper.kvstore import KVStore
 from lib.couchbase_helper.cluster import Cluster
 log = logger.Logger.get_logger()

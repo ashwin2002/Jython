@@ -261,83 +261,25 @@ class BucketHelper(RestConnection):
         return status
 
     # figure out the proxy port
-    
-    def create_bucket(self, bucket='',
-                      ramQuotaMB=1,
-                      authType='none',
-                      saslPassword='',
-                      replicaNumber=1,
-                      proxyPort=11211,
-                      bucketType='membase',
-                      replica_index=1,
-                      threadsNumber=3,
-                      flushEnabled=1,
-                      evictionPolicy='valueOnly',
-                      lww=False,
-                      maxTTL=None,
-                      compressionMode='passive'):
-
+    def create_bucket(self, bucket_params={}):
 
         api = '{0}{1}'.format(self.baseUrl, 'pools/default/buckets')
-        params = urllib.urlencode({})
-
-
-        # this only works for default bucket ?
-        if bucket == 'default':
-            init_params = {'name': bucket,
-                           'authType': 'sasl',
-                           'saslPassword': saslPassword,
-                           'ramQuotaMB': ramQuotaMB,
-                           'replicaNumber': replicaNumber,
-                           #'proxyPort': proxyPort,
-                           'bucketType': bucketType,
-                           'replicaIndex': replica_index,
-                           'threadsNumber': threadsNumber,
-                           'flushEnabled': flushEnabled,
-                           'evictionPolicy': evictionPolicy}
-
-        elif authType == 'none':
-            init_params = {'name': bucket,
-                           'ramQuotaMB': ramQuotaMB,
-                           'authType': authType,
-                           'replicaNumber': replicaNumber,
-                           #'proxyPort': proxyPort,
-                           'bucketType': bucketType,
-                           'replicaIndex': replica_index,
-                           'threadsNumber': threadsNumber,
-                           'flushEnabled': flushEnabled,
-                           'evictionPolicy': evictionPolicy}
-        elif authType == 'sasl':
-            init_params = {'name': bucket,
-                           'ramQuotaMB': ramQuotaMB,
-                           'authType': authType,
-                           'saslPassword': saslPassword,
-                           'replicaNumber': replicaNumber,
-                           #'proxyPort': self.get_nodes_self().moxi,
-                           'bucketType': bucketType,
-                           'replicaIndex': replica_index,
-                           'threadsNumber': threadsNumber,
-                           'flushEnabled': flushEnabled,
-                           'evictionPolicy': evictionPolicy}
-        if lww:
+        init_params = {'name': bucket_params.get('name','default'),
+                       'ramQuotaMB': bucket_params.get('size',256),
+                       'replicaNumber': bucket_params.get('replicas',1),
+                       'bucketType': bucket_params.get('type','membase'),
+                       'replicaIndex': bucket_params.get('replica_index',1),
+                       'threadsNumber': bucket_params.get('threadsNumber'),
+                       'flushEnabled': bucket_params.get('flushEnabled',1),
+                       'evictionPolicy': bucket_params.get('evictionPolicy','valueOnly'),
+                       'compressionMode': bucket_params.get('compressionMode')}
+                            
+        if bucket_params.get('lww'):
+            init_params['maxTTL'] = bucket_params.get('lww')
+        if bucket_params.get('maxTTL'):
             init_params['conflictResolutionType'] = 'lww'
-
-        if maxTTL:
-            init_params['maxTTL'] = maxTTL
-        if compressionMode:
-            init_params['compressionMode'] = compressionMode
-            
-        if bucketType == 'ephemeral':
-            del init_params['replicaIndex']     # does not apply to ephemeral buckets, and is even rejected
-
-#         versions = self.get_nodes_versions()
-#         pre_spock = False
-#         for version in versions:
-#             if "5" > version:
-#                 pre_spock = True
-# 
-#         if pre_spock:
-#             init_params['proxyPort'] = proxyPort
+        if bucket_params.get('type') == 'ephemeral':
+            init_params.remove('replicaIndex')     # does not apply to ephemeral buckets, and is even rejected
 
         params = urllib.urlencode(init_params)
 
@@ -354,17 +296,119 @@ class BucketHelper(RestConnection):
                 log.info("The bucket still exists, sleep 1 sec and retry")
                 time.sleep(1)
             else:
-                raise BucketCreationException(ip=self.ip, bucket_name=bucket)
+                raise BucketCreationException(ip=self.ip, bucket_name=bucket_params.get('name'))
 
         if (numsleep + 1) == maxwait:
             log.error("Tried to create the bucket for {0} secs.. giving up".
                       format(maxwait))
-            raise BucketCreationException(ip=self.ip, bucket_name=bucket)
+            raise BucketCreationException(ip=self.ip, bucket_name=bucket_params.get('name'))
 
         create_time = time.time() - create_start_time
         log.info("{0:.02f} seconds to create bucket {1}".
-                 format(round(create_time, 2), bucket))
+                 format(round(create_time, 2), bucket_params.get('name')))
         return status
+       
+#     def create_bucket(self, bucket='',
+#                       ramQuotaMB=1,
+#                       authType='none',
+#                       saslPassword='',
+#                       replicaNumber=1,
+#                       bucketType='membase',
+#                       replica_index=1,
+#                       threadsNumber=3,
+#                       flushEnabled=1,
+#                       evictionPolicy='valueOnly',
+#                       lww=False,
+#                       maxTTL=None,
+#                       compressionMode='passive'):
+# 
+# 
+#         api = '{0}{1}'.format(self.baseUrl, 'pools/default/buckets')
+#         params = urllib.urlencode({})
+# 
+# 
+#         # this only works for default bucket ?
+#         if bucket == 'default':
+#             init_params = {'name': bucket,
+#                            'authType': 'sasl',
+#                            'saslPassword': saslPassword,
+#                            'ramQuotaMB': ramQuotaMB,
+#                            'replicaNumber': replicaNumber,
+#                            'bucketType': bucketType,
+#                            'replicaIndex': replica_index,
+#                            'threadsNumber': threadsNumber,
+#                            'flushEnabled': flushEnabled,
+#                            'evictionPolicy': evictionPolicy}
+# 
+#         elif authType == 'none':
+#             init_params = {'name': bucket,
+#                            'ramQuotaMB': ramQuotaMB,
+#                            'authType': authType,
+#                            'replicaNumber': replicaNumber,
+#                            #'proxyPort': proxyPort,
+#                            'bucketType': bucketType,
+#                            'replicaIndex': replica_index,
+#                            'threadsNumber': threadsNumber,
+#                            'flushEnabled': flushEnabled,
+#                            'evictionPolicy': evictionPolicy}
+#         elif authType == 'sasl':
+#             init_params = {'name': bucket,
+#                            'ramQuotaMB': ramQuotaMB,
+#                            'authType': authType,
+#                            'saslPassword': saslPassword,
+#                            'replicaNumber': replicaNumber,
+#                            #'proxyPort': self.get_nodes_self().moxi,
+#                            'bucketType': bucketType,
+#                            'replicaIndex': replica_index,
+#                            'threadsNumber': threadsNumber,
+#                            'flushEnabled': flushEnabled,
+#                            'evictionPolicy': evictionPolicy}
+#         if lww:
+#             init_params['conflictResolutionType'] = 'lww'
+# 
+#         if maxTTL:
+#             init_params['maxTTL'] = maxTTL
+#         if compressionMode:
+#             init_params['compressionMode'] = compressionMode
+#             
+#         if bucketType == 'ephemeral':
+#             del init_params['replicaIndex']     # does not apply to ephemeral buckets, and is even rejected
+# 
+# #         versions = self.get_nodes_versions()
+# #         pre_spock = False
+# #         for version in versions:
+# #             if "5" > version:
+# #                 pre_spock = True
+# # 
+# #         if pre_spock:
+# #             init_params['proxyPort'] = proxyPort
+# 
+#         params = urllib.urlencode(init_params)
+# 
+#         log.info("{0} with param: {1}".format(api, params))
+#         create_start_time = time.time()
+# 
+#         maxwait = 60
+#         for numsleep in range(maxwait):
+#             status, content, header = self._http_request(api, 'POST', params)
+#             if status:
+#                 break
+#             elif (int(header['status']) == 503 and
+#                     '{"_":"Bucket with given name still exists"}' in content):
+#                 log.info("The bucket still exists, sleep 1 sec and retry")
+#                 time.sleep(1)
+#             else:
+#                 raise BucketCreationException(ip=self.ip, bucket_name=bucket)
+# 
+#         if (numsleep + 1) == maxwait:
+#             log.error("Tried to create the bucket for {0} secs.. giving up".
+#                       format(maxwait))
+#             raise BucketCreationException(ip=self.ip, bucket_name=bucket)
+# 
+#         create_time = time.time() - create_start_time
+#         log.info("{0:.02f} seconds to create bucket {1}".
+#                  format(round(create_time, 2), bucket))
+#         return status
 
     def change_bucket_props(self, bucket,
                       ramQuotaMB=None,
