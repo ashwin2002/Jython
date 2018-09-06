@@ -84,7 +84,7 @@ class Bucket(object):
         self.name = new_params.get(Bucket.name, "default")
         self.type = new_params.get(Bucket.type, Bucket.bucket_type.MEMBASE)
         self.replicas = new_params.get(Bucket.replicas, 0)
-        self.size = new_params.get(Bucket.size, 256)
+        self.size = new_params.get(Bucket.size, 100)
         self.kvs = {1:KVStore()}
         self.eviction_policy = new_params.get(Bucket.eviction_policy, Bucket.bucket_eviction_policy.VALUE_ONLY)
         self.enable_replica_index = new_params.get(Bucket.enable_replica_index, 0)
@@ -104,6 +104,7 @@ class Bucket(object):
         return self.params['name']
     
 class bucket_utils():
+    
     def __init__(self, server):
         self.master = server
         self.server = server
@@ -169,17 +170,11 @@ class bucket_utils():
                     self.bucket_size = self._get_bucket_size(ram_available, \
                                                              self.total_buckets)
                     
-    def change_max_buckets(self, total_buckets):
-        command = "curl -X POST -u {0}:{1} -d maxBucketCount={2} http://{3}:{4}/internalSettings".format \
-            (self.server.rest_username,
-             self.server.rest_password,
-             total_buckets,
-             self.server.ip,
-             self.server.port)
-        shell = RemoteMachineShellConnection(self.server)
-        output, error = shell.execute_command_raw(command)
-        shell.log_command_output(output, error)
-        shell.disconnect()
+    def create_bucket(self, bucket):
+        if not isinstance(bucket, Bucket):
+            raise
+        self.cluster.create_bucket(self.server, bucket.__dict__)
+        self.buckets.append(bucket)
         
     def _bucket_creation(self):
         if self.default_bucket:
@@ -194,6 +189,31 @@ class bucket_utils():
         self._create_standard_buckets(self.master, self.standard_buckets)
         self._create_memcached_buckets(self.master, self.memcached_buckets)
 
+    def create_default_bucket(self):
+        node_info = self.rest.get_nodes_self()
+        if node_info.memoryQuota and int(node_info.memoryQuota) > 0 :
+            ram_available = node_info.memoryQuota
+            
+        self.bucket_size = ram_available - 1
+        default_bucket = Bucket({Bucket.size:self.bucket_size})
+        self.cluster.create_bucket(self.server, default_bucket.__dict__)
+        self.buckets.append(default_bucket)
+        
+        if self.enable_time_sync:
+            self._set_time_sync_on_buckets([default_bucket.Bucket.name])
+    
+    def change_max_buckets(self, total_buckets):
+        command = "curl -X POST -u {0}:{1} -d maxBucketCount={2} http://{3}:{4}/internalSettings".format \
+            (self.server.rest_username,
+             self.server.rest_password,
+             total_buckets,
+             self.server.ip,
+             self.server.port)
+        shell = RemoteMachineShellConnection(self.server)
+        output, error = shell.execute_command_raw(command)
+        shell.log_command_output(output, error)
+        shell.disconnect()
+        
     def _get_bucket_size(self, mem_quota, num_buckets):
         # min size is 100MB now
         return max(100, int(float(mem_quota) / float(num_buckets)))
@@ -226,54 +246,6 @@ class bucket_utils():
     def get_bucket_compressionMode(self, bucket='default'):
         bucket_info = self.get_bucket_json(bucket=bucket)
         return bucket_info['compressionMode']
-
-    def create_default_bucket(self):
-        node_info = self.rest.get_nodes_self()
-        if node_info.memoryQuota and int(node_info.memoryQuota) > 0 :
-            ram_available = node_info.memoryQuota
-            
-        self.bucket_size = ram_available - 1
-        default_bucket = Bucket({Bucket.size:self.bucket_size})
-        self.cluster.create_bucket(self.server, default_bucket.__dict__)
-        self.buckets.append(default_bucket)
-        
-        if self.enable_time_sync:
-            self._set_time_sync_on_buckets([default_bucket.Bucket.name])
-
-#     def create_bucket(self, serverInfo, name='default', replica=1, port=11210, test_case=None, bucket_ram=-1, password=None):
-#         log = logger.Logger.get_logger()
-#         rest = RestConnection(serverInfo)
-#         bucket_conn = BucketHelper(serverInfo)
-#         if bucket_ram < 0:
-#             info = rest.get_nodes_self()
-#             bucket_ram = info.memoryQuota * 2 / 3
-# 
-#         if password == None:
-#             authType = "sasl"
-#         else:
-#             authType = "none"
-# 
-#         bucket_conn.create_bucket(bucket=name,
-#                            ramQuotaMB=bucket_ram,
-#                            replicaNumber=replica,
-#                            proxyPort=port,
-#                            authType=authType,
-#                            saslPassword=password,
-#                            maxTTL=self.maxttl, compressionMode=self.compression_mode)
-#         msg = 'create_bucket succeeded but bucket "{0}" does not exist'
-#         bucket_created = self.wait_for_bucket_creation(name, bucket_conn)
-#         if not bucket_created:
-#             log.error(msg)
-#             if test_case:
-#                 test_case.fail(msg=msg.format(name))
-#         
-#         if bucket_created:      
-#             self.buckets.append(Bucket(name=name, authType="sasl", saslPassword="",
-#                                 num_replicas=self.num_replicas, bucket_size=self.bucket_size,
-#                                 eviction_policy=self.eviction_policy, lww=self.lww,
-#                                 type=self.bucket_type,
-#                                 maxttl=self.maxttl, compression_mode=self.compression_mode))
-#         return bucket_created
     
     def create_multiple_buckets(self, server, replica, bucket_ram_ratio=(2.0 / 3.0),
                                 howmany=3, sasl=True, saslPassword='password',
