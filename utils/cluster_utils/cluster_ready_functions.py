@@ -9,7 +9,6 @@ from couchbase_cli import CouchbaseCLI
 from membase.api.rest_client import RestConnection, RestHelper
 from remote.remote_util import RemoteMachineShellConnection
 from membase.helper.cluster_helper import ClusterOperationHelper
-from ClusterLib.ClusterOperations import ClusterHelper
 from TestInput import TestInputSingleton
 import logger
 import time
@@ -32,38 +31,37 @@ class CBCluster:
         self.master = master
         
 class cluster_utils():
+    
     def __init__(self, cluster):
         self.input = TestInputSingleton.input
         self.cluster = cluster
-        self.master = cluster.master
         self.rest = RestConnection(cluster.master)
         self.vbuckets = self.input.param("vbuckets", 1024)
         self.upr = self.input.param("upr", None)
         self.log = logger.Logger.get_logger()
     
     def _cluster_cleanup(self, bucket_util):
-        rest = RestConnection(self.master)
+        rest = RestConnection(self.cluster.master)
         alerts = rest.get_alerts()
         if rest._rebalance_progress_status() == 'running':
             self.kill_memcached()
-            log.warning("rebalancing is still running, test should be verified")
+            self.log.warning("rebalancing is still running, test should be verified")
             stopped = rest.stop_rebalance()
             self.assertTrue(stopped, msg="unable to stop rebalance")
-            bucket_util.delete_all_buckets(self.servers)
+            bucket_util.delete_all_buckets(self.cluster.servers)
         ClusterOperationHelper.cleanup_cluster(self.cluster.servers, master=self.cluster.master)
-#         self.sleep(10)
         ClusterOperationHelper.wait_for_ns_servers_or_assert(self.cluster.servers, self)
         
     def get_nodes_in_cluster(self, master_node=None):
         rest = None
         if master_node == None:
-            rest = RestConnection(self.master)
+            rest = RestConnection(self.cluster.master)
         else:
             rest = RestConnection(master_node)
         nodes = rest.node_statuses()
         server_set = []
         for node in nodes:
-            for server in self.servers:
+            for server in self.cluster.servers:
                 if server.ip == node.ip:
                     server_set.append(server)
         return server_set
@@ -72,7 +70,7 @@ class cluster_utils():
         self.chk_max_items = self.input.param("chk_max_items", None)
         self.chk_period = self.input.param("chk_period", None)
         if self.chk_max_items or self.chk_period:
-            for server in self.servers:
+            for server in self.cluster.servers:
                 rest = RestConnection(server)
                 if self.chk_max_items:
                     rest.set_chk_max_items(self.chk_max_items)
@@ -80,10 +78,10 @@ class cluster_utils():
                     rest.set_chk_period(self.chk_period)
 
     def change_password(self, new_password="new_password"):
-        nodes = RestConnection(self.master).node_statuses()
+        nodes = RestConnection(self.cluster.master).node_statuses()
 
 
-        cli = CouchbaseCLI(self.master, self.master.rest_username, self.master.rest_password  )
+        cli = CouchbaseCLI(self.cluster.master, self.cluster.master.rest_username, self.cluster.master.rest_password  )
         output, err, result = cli.setting_cluster(data_ramsize=False, index_ramsize=False, fts_ramsize=False, cluster_name=None,
                          cluster_username=None, cluster_password=new_password, cluster_port=False)
 
@@ -93,20 +91,20 @@ class cluster_utils():
             raise Exception("Password didn't change!")
         self.log.info("new password '%s' on nodes: %s" % (new_password, [node.ip for node in nodes]))
         for node in nodes:
-            for server in self.servers:
+            for server in self.cluster.servers:
                 if server.ip == node.ip and int(server.port) == int(node.port):
                     server.rest_password = new_password
                     break
 
     def change_port(self, new_port="9090", current_port='8091'):
-        nodes = RestConnection(self.master).node_statuses()
-        remote_client = RemoteMachineShellConnection(self.master)
+        nodes = RestConnection(self.cluster.master).node_statuses()
+        remote_client = RemoteMachineShellConnection(self.cluster.master)
         options = "--cluster-port=%s" % new_port
         cli_command = "cluster-edit"
         output, error = remote_client.execute_couchbase_cli(cli_command=cli_command, options=options,
                                                             cluster_host="localhost:%s" % current_port,
-                                                            user=self.master.rest_username,
-                                                            password=self.master.rest_password)
+                                                            user=self.cluster.master.rest_username,
+                                                            password=self.cluster.master.rest_password)
         self.log.info(output)
         # MB-10136 & MB-9991
         if error:
@@ -114,7 +112,7 @@ class cluster_utils():
         self.port = new_port
         self.log.info("new port '%s' on nodes: %s" % (new_port, [node.ip for node in nodes]))
         for node in nodes:
-            for server in self.servers:
+            for server in self.cluster.servers:
                 if server.ip == node.ip and int(server.port) == int(node.port):
                     server.port = new_port
                     break
@@ -138,7 +136,7 @@ class cluster_utils():
 
     def reset_env_variables(self):
         if self.vbuckets != 1024 or self.upr != None:
-            for server in self.servers:
+            for server in self.cluster.servers:
                 if self.upr or self.vbuckets:
                     remote_client = RemoteMachineShellConnection(server)
                     remote_client.reset_env_variables()
@@ -146,7 +144,7 @@ class cluster_utils():
             self.log.info("========= RESET ENVIRONMENT SETTING TO ORIGINAL ===========")
 
     def change_log_info(self):
-        for server in self.servers:
+        for server in self.cluster.servers:
             remote_client = RemoteMachineShellConnection(server)
             remote_client.stop_couchbase()
             remote_client.change_log_level(self.log_info)
@@ -155,7 +153,7 @@ class cluster_utils():
         self.log.info("========= CHANGED LOG LEVELS ===========")
 
     def change_log_location(self):
-        for server in self.servers:
+        for server in self.cluster.servers:
             remote_client = RemoteMachineShellConnection(server)
             remote_client.stop_couchbase()
             remote_client.configure_log_location(self.log_location)
@@ -164,7 +162,7 @@ class cluster_utils():
         self.log.info("========= CHANGED LOG LOCATION ===========")
 
     def change_stat_info(self):
-        for server in self.servers:
+        for server in self.cluster.servers:
             remote_client = RemoteMachineShellConnection(server)
             remote_client.stop_couchbase()
             remote_client.change_stat_periodicity(self.stat_info)
@@ -173,7 +171,7 @@ class cluster_utils():
         self.log.info("========= CHANGED STAT PERIODICITY ===========")
 
     def change_port_info(self):
-        for server in self.servers:
+        for server in self.cluster.servers:
             remote_client = RemoteMachineShellConnection(server)
             remote_client.stop_couchbase()
             remote_client.change_port_static(self.port_info)
@@ -184,8 +182,8 @@ class cluster_utils():
         self.log.info("========= CHANGED ALL PORTS ===========")
 
     def force_eject_nodes(self):
-        for server in self.servers:
-            if server != self.servers[0]:
+        for server in self.cluster.servers:
+            if server != self.cluster.servers[0]:
                 try:
                     rest = RestConnection(server)
                     rest.force_eject_node()
@@ -198,7 +196,7 @@ class cluster_utils():
             for server in servers:
                 rest = RestConnection(server)
                 rest.set_enable_flow_control(bucket=bucket.name, flow=flow)
-        for server in self.servers:
+        for server in self.cluster.servers:
             remote_client = RemoteMachineShellConnection(server)
             remote_client.stop_couchbase()
             remote_client.start_couchbase()
@@ -212,13 +210,13 @@ class cluster_utils():
             
     def get_nodes(self, server):
         """ Get Nodes from list of server """
-        rest = RestConnection(self.master)
+        rest = RestConnection(self.cluster.master)
         nodes = rest.get_nodes()
         return nodes
     
     def stop_server(self, node):
         """ Method to stop a server which is subject to failover """
-        for server in self.servers:
+        for server in self.cluster.servers:
             if server.ip == node.ip:
                 shell = RemoteMachineShellConnection(server)
                 if shell.is_couchbase_installed():
@@ -232,7 +230,7 @@ class cluster_utils():
 
     def start_server(self, node):
         """ Method to start a server which is subject to failover """
-        for server in self.servers:
+        for server in self.cluster.servers:
             if server.ip == node.ip:
                 shell = RemoteMachineShellConnection(server)
                 if shell.is_couchbase_installed():
@@ -327,7 +325,7 @@ class cluster_utils():
             RestConnection(server).set_index_settings(json)
 
     def _version_compatability(self, compatible_version):
-        rest = RestConnection(self.master)
+        rest = RestConnection(self.cluster.master)
         versions = rest.get_nodes_versions()
         for version in versions:
             if compatible_version <= version:
@@ -336,14 +334,14 @@ class cluster_utils():
 
     def get_kv_nodes(self, servers=None, master=None):
         if not master:
-            master = self.master
+            master = self.cluster.master
         rest = RestConnection(master)
         versions = rest.get_nodes_versions()
         for version in versions:
             if "3.5" > version:
                 return servers
         if servers == None:
-            servers = self.servers
+            servers = self.cluster.servers
         kv_servers = self.get_nodes_from_services_map(service_type="kv", get_all_nodes=True,servers=servers, master=master)
         new_servers = []
         for server in servers:
@@ -353,7 +351,7 @@ class cluster_utils():
         return new_servers
 
     def get_protocol_type(self):
-        rest = RestConnection(self.master)
+        rest = RestConnection(self.cluster.master)
         versions = rest.get_nodes_versions()
         for version in versions:
             if "3" > version:
@@ -384,7 +382,7 @@ class cluster_utils():
         """ Add or Remove servers from server list """
         initial_list = copy.deepcopy(list)
         for add_server in add_list:
-            for server in self.servers:
+            for server in self.cluster.servers:
                 if add_server != None and server.ip == add_server.ip:
                     initial_list.append(add_server)
         for remove_server in remove_list:
@@ -398,7 +396,7 @@ class cluster_utils():
         if len(nodes)>=1:
             for server in nodes:
                 '''This is the case when master node is running cbas service as well'''
-                if self.master.ip != server.ip:
+                if self.cluster.master.ip != server.ip:
                     otpNodes.append(self.rest.add_node(user=server.rest_username,
                                                password=server.rest_password,
                                                remoteIp=server.ip,

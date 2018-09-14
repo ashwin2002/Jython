@@ -130,6 +130,7 @@ class bucket_utils():
         self.buckets = []
         self.input = TestInputSingleton.input
         self.enable_time_sync = self.input.param("enable_time_sync", False)
+        self.sdk_compression = self.input.param("sdk_compression", True)
     
     def create_bucket(self, bucket):
         if not isinstance(bucket, Bucket):
@@ -573,8 +574,6 @@ class bucket_utils():
                           only_store_hash=True, batch_size=1000, pause_secs=1, timeout_secs=30,
                           proxy_client=None, percentage=0.90):
 
-
-
         stats_all_buckets = {}
         for bucket in self.buckets:
             stats_all_buckets[bucket.name] = StatsCommon()
@@ -971,7 +970,37 @@ class bucket_utils():
             task = self.task.async_verify_meta_data(dest_server, bucket, bucket.kvs[kv_store],
                                                        meta_data_store[bucket.name])
             task.result()
-            
+
+    def load(self, generators_load, buckets=None, exp=0, flag=0,
+             kv_store=1, only_store_hash=True, batch_size=1, pause_secs=1,
+             timeout_secs=30, op_type='create', start_items=0, verify_data=True):
+        if not buckets:
+            buckets = self.get_all_buckets(self.cluster.master)
+        gens_load = {}
+        for bucket in buckets:
+            tmp_gen = []
+            for generator_load in generators_load:
+                tmp_gen.append(copy.deepcopy(generator_load))
+            gens_load[bucket] = copy.deepcopy(tmp_gen)
+        tasks = []
+        items = 0
+        for bucket in buckets:
+            for gen_load in gens_load[bucket]:
+                items += (gen_load.end - gen_load.start)
+        for bucket in buckets:
+            log.info("%s %s to %s documents..." % (op_type, items, bucket.name))
+            tasks.append(self.task.async_load_gen_docs(self.cluster.master, bucket.name,
+                                                          gens_load[bucket],
+                                                          bucket.kvs[kv_store], op_type, exp, flag,
+                                                          only_store_hash, batch_size, pause_secs,
+                                                          timeout_secs, compression=self.sdk_compression))
+        for task in tasks:
+            task.get_result()
+        self.num_items = items + start_items
+        if verify_data:
+            self.verify_cluster_stats(self.servers[:self.nodes_init])
+        log.info("LOAD IS FINISHED")
+
     def sync_ops_all_buckets(self, docs_gen_map={}, batch_size=10, verify_data=True):
         for key in docs_gen_map.keys():
             if key != "remaining":

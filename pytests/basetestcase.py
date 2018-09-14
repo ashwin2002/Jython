@@ -194,13 +194,13 @@ class BaseTestCase(unittest.TestCase, failover_utils, node_utils, views_utils):
             else:
                 self.quota = ""
             if self.input.param("log_info", None):
-                self.change_log_info()
+                self.cluster_util.change_log_info()
             if self.input.param("log_location", None):
-                self.change_log_location()
+                self.cluster_util.change_log_location()
             if self.input.param("stat_info", None):
-                self.change_stat_info()
+                self.cluster_util.change_stat_info()
             if self.input.param("port_info", None):
-                self.change_port_info()
+                self.cluster_util.change_port_info()
             if self.input.param("port", None):
                 self.port = str(self.input.param("port", None))
             try:
@@ -687,33 +687,3 @@ class BaseTestCase(unittest.TestCase, failover_utils, node_utils, views_utils):
                         continue
                 all_docs_list.append(val)
         return all_docs_list
-
-    def load(self, generators_load, buckets=None, exp=0, flag=0,
-             kv_store=1, only_store_hash=True, batch_size=1, pause_secs=1,
-             timeout_secs=30, op_type='create', start_items=0, verify_data=True):
-        if not buckets:
-            buckets = self.buckets
-        gens_load = {}
-        for bucket in buckets:
-            tmp_gen = []
-            for generator_load in generators_load:
-                tmp_gen.append(copy.deepcopy(generator_load))
-            gens_load[bucket] = copy.deepcopy(tmp_gen)
-        tasks = []
-        items = 0
-        for bucket in buckets:
-            for gen_load in gens_load[bucket]:
-                items += (gen_load.end - gen_load.start)
-        for bucket in buckets:
-            log.info("%s %s to %s documents..." % (op_type, items, bucket.name))
-            tasks.append(self.task.async_load_gen_docs(self.master, bucket.name,
-                                                          gens_load[bucket],
-                                                          bucket.kvs[kv_store], op_type, exp, flag,
-                                                          only_store_hash, batch_size, pause_secs,
-                                                          timeout_secs, compression=self.sdk_compression))
-        for task in tasks:
-            task.get_result()
-        self.num_items = items + start_items
-        if verify_data:
-            self.verify_cluster_stats(self.servers[:self.nodes_init])
-        log.info("LOAD IS FINISHED")
