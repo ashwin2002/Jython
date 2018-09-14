@@ -11,6 +11,24 @@ from remote.remote_util import RemoteMachineShellConnection
 from ClusterLib.ClusterOperations import ClusterHelper
 import logger
 import time
+
+
+class CBCluster:
+    
+    def __init__(self, name="default",username="Administrator", 
+                 password="password", paths=None, servers=None):
+        self.name = name
+        self.username = username
+        self.password = password
+        self.paths = paths
+        self.ram_settings = {}
+        self.servers = servers
+        self.nodes_in_cluster = []
+        self.master = servers[0]
+    
+    def update_master(self,master):
+        self.master = master
+        
 class cluster_utils():
     def __init__(self, server):
         self.master = server
@@ -206,6 +224,7 @@ class cluster_utils():
                     self.log.info("Membase started")
                 shell.disconnect()
                 break
+            
     def reset_cluster(self):
         if self.targetMaster or self.reset_services:
             try:

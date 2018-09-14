@@ -17,6 +17,7 @@ import testconstants
 from scripts.collect_server_info import cbcollectRunner
 from bucket_utils.bucket_ready_functions import bucket_utils
 from cluster_utils.cluster_ready_functions import cluster_utils
+from cluster_utils.cluster_ready_functions import CBCluster
 from failover_utils.failover_ready_functions import failover_utils
 from node_utils.node_ready_functions import node_utils
 from views_utils.view_ready_functions import views_utils
@@ -51,6 +52,7 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
 #         self.bucket_base_params = {}
 #         self.bucket_base_params['membase'] = {}
         self.master = self.servers[0]
+        self.cluster_details = CBCluster(servers=self.input.servers)
         self.bucket_util = bucket_utils(self.master)
         self.cluster_util = cluster_utils(self.master)
         self.indexManager = self.servers[0]
@@ -72,19 +74,6 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
         self.data_collector = DataCollector()
         self.data_analyzer = DataAnalyzer()
         self.result_analyzer = DataAnalysisResultAnalyzer()
-        #         self.set_testrunner_client()
-#         self.change_bucket_properties = False
-#         self.cbas_node = self.input.cbas
-#         self.cbas_servers = []
-#         self.kv_servers = []
-#         self.otpNodes = []
-#         for server in self.servers:
-#             if "cbas" in server.services:
-#                 self.cbas_servers.append(server)
-#             if "kv" in server.services:
-#                 self.kv_servers.append(server)
-#         if not self.cbas_node and len(self.cbas_servers) >= 1:
-#             self.cbas_node = self.cbas_servers[0]
 
         try:
             self.skip_setup_cleanup = self.input.param("skip_setup_cleanup", False)
@@ -100,15 +89,8 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
             self.case_number = self.input.param("case_number", 0)
             self.default_bucket = self.input.param("default_bucket", True)
             self.parallelism = self.input.param("parallelism", False)
-#             if self.default_bucket:
-#                 self.default_bucket_name = "default"
-#             self.standard_buckets = self.input.param("standard_buckets", 0)
-#             self.sasl_buckets = self.input.param("sasl_buckets", 0)
-#             self.num_buckets = self.input.param("num_buckets", 0)
             self.verify_unacked_bytes = self.input.param("verify_unacked_bytes", False)
-#             self.memcached_buckets = self.input.param("memcached_buckets", 0)
             self.enable_flow_control = self.input.param("enable_flow_control", False)
-#             self.total_buckets = self.sasl_buckets + self.default_bucket + self.standard_buckets + self.memcached_buckets
             self.num_servers = self.input.param("servers", len(self.servers))
             # initial number of items in the cluster
             self.nodes_init = self.input.param("nodes_init", 1)
@@ -145,26 +127,6 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
             self.enable_bloom_filter = self.input.param("enable_bloom_filter", False)
 #             self.enable_time_sync = self.input.param("enable_time_sync", False)
             self.gsi_type = self.input.param("gsi_type", 'plasma')
-            # bucket parameters go here,
-#             self.bucket_size = self.input.param("bucket_size", None)
-#             self.bucket_type = self.input.param("bucket_type", 'membase')
-#             self.num_replicas = self.input.param("replicas", 1)
-#             self.enable_replica_index = self.input.param("index_replicas", 1)
-#             self.eviction_policy = self.input.param("eviction_policy", 'valueOnly')  # or 'fullEviction'
-#             # for ephemeral bucket is can be noEviction or nruEviction
-#             if self.bucket_type == 'ephemeral' and self.eviction_policy == 'valueOnly':
-#                 # use the ephemeral bucket default
-#                 self.eviction_policy = 'noEviction'
-# 
-#             # for ephemeral buckets it
-#             self.sasl_password = self.input.param("sasl_password", 'password')
-#             self.lww = self.input.param("lww", False)  # only applies to LWW but is here because the bucket is created here
-#             self.maxttl = self.input.param("maxttl", None)
-#             self.compression_mode = self.input.param("compression_mode", 'passive')
-#             self.sdk_compression = self.input.param("sdk_compression", True)
-#             self.sasl_bucket_name = "bucket"
-#             self.sasl_bucket_priority = self.input.param("sasl_bucket_priority", None)
-#             self.standard_bucket_priority = self.input.param("standard_bucket_priority", None)
 
             #jre-path for cbas
             self.jre_path=self.input.param("jre_path",None)
@@ -184,34 +146,11 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
                     log.info("couchbase server does not run yet")
                 self.protocol = self.get_protocol_type()
             self.services_map = None
-#             if self.sasl_bucket_priority is not None:
-#                 self.sasl_bucket_priority = self.sasl_bucket_priority.split(":")
-#             if self.standard_bucket_priority is not None:
-#                 self.standard_bucket_priority = self.standard_bucket_priority.split(":")
 
             log.info("==============  basetestcase setup was started for test #{0} {1}==============" \
                           .format(self.case_number, self._testMethodName))
             if not self.skip_buckets_handle and not self.skip_init_check_cbserver:
                 self._cluster_cleanup()
-
-#             shared_params = self._create_bucket_params(server=self.master, size=self.bucket_size,
-#                                                        replicas=self.num_replicas,
-#                                                        enable_replica_index=self.enable_replica_index,
-#                                                        eviction_policy=self.eviction_policy, bucket_priority=None,
-#                                                        lww=self.lww, maxttl=self.maxttl,
-#                                                        compression_mode=self.compression_mode)
-# 
-#             membase_params = copy.deepcopy(shared_params)
-#             membase_params['bucket_type'] = 'membase'
-#             self.bucket_base_params['membase']['non_ephemeral'] = membase_params
-# 
-#             membase_ephemeral_params = copy.deepcopy(shared_params)
-#             membase_ephemeral_params['bucket_type'] = 'ephemeral'
-#             self.bucket_base_params['membase']['ephemeral'] = membase_ephemeral_params
-# 
-#             memcached_params = copy.deepcopy(shared_params)
-#             memcached_params['bucket_type'] = 'memcached'
-#             self.bucket_base_params['memcached'] = memcached_params
 
             # avoid any cluster operations in setup for new upgrade
             #  & upgradeXDCR tests
@@ -301,38 +240,6 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
                 self.case_number += 1000
                 self.fail(e)
 
-#             if self.dgm_run:
-#                 self.quota = 256
-#             if self.total_buckets > 10:
-#                 log.info("================== changing max buckets from 10 to {0} =================" \
-#                               .format(self.total_buckets))
-#                 self.change_max_buckets(self, self.total_buckets)
-#             if self.total_buckets > 0 and not self.skip_init_check_cbserver:
-#                 """ from sherlock, we have index service that could take some
-#                     RAM quota from total RAM quota for couchbase server.  We need
-#                     to get the correct RAM quota available to create bucket(s)
-#                     after all services were set """
-#                 node_info = RestConnection(self.master).get_nodes_self()
-#                 if node_info.memoryQuota and int(node_info.memoryQuota) > 0:
-#                     ram_available = node_info.memoryQuota
-#                 else:
-#                     ram_available = self.quota
-#                 if self.bucket_size is None:
-#                     if self.dgm_run:
-#                         """ if dgm is set,
-#                             we need to set bucket size to dgm setting """
-#                         self.bucket_size = self.quota
-#                     else:
-#                         self.bucket_size = self._get_bucket_size(ram_available, \
-#                                                                  self.total_buckets)
-
-#             self.bucket_base_params['membase']['non_ephemeral']['size'] = self.bucket_size
-#             self.bucket_base_params['membase']['ephemeral']['size'] = self.bucket_size
-#             self.bucket_base_params['memcached']['size'] = self.bucket_size
-
-            if str(self.__class__).find('upgrade_tests') == -1 and \
-                            str(self.__class__).find('newupgradetests') == -1:
-                self.bucket_util._bucket_creation()
             log.info("==============  basetestcase setup was finished for test #{0} {1} ==============" \
                           .format(self.case_number, self._testMethodName))
 
@@ -414,7 +321,7 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
                     log.warning("rebalancing is still running, test should be verified")
                     stopped = rest.stop_rebalance()
                     self.assertTrue(stopped, msg="unable to stop rebalance")
-                self.delete_all_buckets_or_assert(self.servers)
+                self.bucket_util.delete_all_buckets(self.servers)
                 ClusterOperationHelper.cleanup_cluster(self.servers, master=self.master)
                 ClusterOperationHelper.wait_for_ns_servers_or_assert(self.servers, self)
                 log.info("==============  basetestcase cleanup was finished for test #{0} {1} ==============" \
@@ -437,19 +344,6 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
 
     def get_index_map(self):
         return RestConnection(self.master).get_index_status()
-
-#     @staticmethod
-#     def change_max_buckets(self, total_buckets):
-#         command = "curl -X POST -u {0}:{1} -d maxBucketCount={2} http://{3}:{4}/internalSettings".format \
-#             (self.servers[0].rest_username,
-#              self.servers[0].rest_password,
-#              total_buckets,
-#              self.servers[0].ip,
-#              self.servers[0].port)
-#         shell = RemoteMachineShellConnection(self.servers[0])
-#         output, error = shell.execute_command_raw(command)
-#         shell.log_command_output(output, error)
-#         shell.disconnect()
 
     @staticmethod
     def _log_start(self):
@@ -479,7 +373,7 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
             log.warning("rebalancing is still running, test should be verified")
             stopped = rest.stop_rebalance()
             self.assertTrue(stopped, msg="unable to stop rebalance")
-        self.bucket_util.delete_all_buckets_or_assert(self.servers)
+        self.bucket_util.delete_all_buckets(self.servers)
         ClusterOperationHelper.cleanup_cluster(self.servers, master=self.master)
 #         self.sleep(10)
         ClusterOperationHelper.wait_for_ns_servers_or_assert(self.servers, self)

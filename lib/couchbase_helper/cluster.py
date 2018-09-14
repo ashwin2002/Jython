@@ -14,12 +14,12 @@ API provides a way to run task do syncronously and asynchronously.
 log = logging.getLogger(__name__)
 
 class Cluster(object):
-    """An API for interacting with Couchbase clusters"""
+    """A Task API for performing various operations synchronously or asynchronously on Couchbase cluster."""
 
     def __init__(self):
         self.task_manager = TaskManager("Cluster_Thread")
 
-    def async_create_bucket(self, server, bucket_params):
+    def async_create_bucket(self, server, bucket):
         """Asynchronously creates the default bucket
 
         Parameters:
@@ -27,64 +27,22 @@ class Cluster(object):
         Returns:
             BucketCreateTask - A task future that is a handle to the scheduled task."""
 #         bucket_params['bucket_name'] = 'default'
-        _task = conc.BucketCreateTask(server, bucket_params, task_manager=self.task_manager)
+        _task = conc.BucketCreateTask(server, bucket, task_manager=self.task_manager)
         self.task_manager.schedule(_task)
         return _task
 
-    def create_bucket(self, server, bucket_params):
-        """Asynchronously creates the default bucket
+    def sync_create_bucket(self, server, bucket):
+        """Synchronously creates the default bucket
 
         Parameters:
             bucket_params - a dictionary containing bucket creation parameters. (Dict)
         Returns:
             BucketCreateTask - A task future that is a handle to the scheduled task."""
 #         bucket_params['bucket_name'] = 'default'
-        _task = conc.BucketCreateTask(server, bucket_params, task_manager=self.task_manager)
+        _task = conc.BucketCreateTask(server, bucket, task_manager=self.task_manager)
         self.task_manager.schedule(_task)
         return _task.get_result()
     
-#     def async_create_sasl_bucket(self, name, password, bucket_params):
-#         """Asynchronously creates a sasl bucket
-# 
-#         Parameters:
-#             bucket_params - a dictionary containing bucket creation parameters. (Dict)
-# 
-#         Returns:
-#             BucketCreateTask - A task future that is a handle to the scheduled task."""
-#         bucket_params['bucket_name'] = name
-#         bucket_params['password'] = password
-#         _task = conc.BucketCreateTask(bucket_params, task_manager=self.task_manager)
-#         self.task_manager.schedule(_task)
-#         return _task
-# 
-#     def async_create_standard_bucket(self, name, port, bucket_params):
-#         """Asynchronously creates a standard bucket
-#         Parameters:
-#             bucket_params - A dictionary containing a list of bucket creation parameters. (Dict)
-#         Returns:
-#             BucketCreateTask - A task future that is a handle to the scheduled task."""
-# 
-#         bucket_params['bucket_name'] = name
-#         bucket_params['port'] = port
-#         _task = conc.BucketCreateTask(bucket_params, task_manager=self.task_manager)
-#         self.task_manager.schedule(_task)
-#         return _task
-# 
-#     def async_create_memcached_bucket(self, name, port, bucket_params):
-#         """Asynchronously creates a standard bucket
-# 
-#         Parameters:
-#             bucket_params - A dictionary containing a list of bucket creation parameters. (Dict)
-# 
-#         Returns:
-#             BucketCreateTask - A task future that is a handle to the scheduled task."""
-#         bucket_params['bucket_name'] = name
-#         bucket_params['port'] = port
-#         bucket_params['bucket_type'] = 'memcached'
-#         _task = conc.BucketCreateTask(bucket_params, task_manager=self.task_manager)
-#         self.task_manager.schedule(_task)
-#         return _task
-
     def async_bucket_delete(self, server, bucket='default'):
         """Asynchronously deletes a bucket
 

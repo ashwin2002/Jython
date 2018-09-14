@@ -655,11 +655,6 @@ class SDKSmartClient(object):
             self.bucket = bucket.name
         else:
             self.bucket = bucket
-        if hasattr(bucket, 'saslPassword'):
-            self.saslPassword = bucket.saslPassword
-        else:
-            bucket_info = BucketHelper(self.server).get_bucket(bucket)
-            self.saslPassword = bucket_info.saslPassword
 
         if rest.ip == "127.0.0.1":
             self.host = "{0}:{1}".format(rest.ip,rest.port)

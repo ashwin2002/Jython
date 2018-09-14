@@ -3519,17 +3519,17 @@ class RemoteMachineShellConnection:
         if not info.domain:
             return None
         log.info("hostname of this {0} is {1}"
-                 .format(self.ip, info.hostname[0]))
+                 .format(self.ip, info.hostname[0].strip()))
         if info.type.lower() == 'windows':
             log.info("domain name of this {0} is {1}"
                  .format(self.ip, info.domain))
-            return '%s.%s' % (info.hostname[0], info.domain)
+            return '%s.%s' % (info.hostname[0].strip(), info.domain.strip())
         else:
             if info.domain[0]:
                 if info.domain[0][0]:
                     log.info("domain name of this {0} is {1}"
-                         .format(self.ip, info.domain[0][0]))
-                    return "{0}.{1}".format(info.hostname[0], info.domain[0][0])
+                         .format(self.ip, info.domain[0][0].strip()))
+                    return "{0}.{1}".format(info.hostname[0].strip(), info.domain[0][0].strip())
                 else:
                     mesg = "Need to set domain name in server {0} like 'sc.couchbase.com'"\
                                                                            .format(self.ip)

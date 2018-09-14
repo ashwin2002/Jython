@@ -35,6 +35,12 @@ class BucketHelper(RestConnection):
             return False
         except Exception:
             return False
+
+    def get_buckets_json(self):
+        api = '{0}{1}'.format(self.baseUrl, 'pools/default/buckets?basic_stats=true')
+        status, content, header = self._http_request(api)
+        json_parsed = json.loads(content)
+        return json_parsed
     
     def get_buckets(self):
         # get all the buckets
@@ -206,36 +212,9 @@ class BucketHelper(RestConnection):
             api = '{0}{1}{2}'.format(self.baseUrl, 'pools/default/buckets/', bucket.name)
         status, content, header = self._http_request(api)
         if not status:
+            log.error("error while getting {0}. Please re-try".format(api))
             raise GetBucketInfoFailed(bucket, content)
         return json.loads(content)
-
-    def is_lww_enabled(self, bucket='default'):
-        bucket_info = self.get_bucket_json(bucket=bucket)
-        try:
-            if bucket_info['conflictResolutionType'] == 'lww':
-                return True
-        except KeyError:
-            return False
-
-    def get_bucket(self, bucket='default', num_attempt=1, timeout=1):
-        bucketInfo = None
-        api = '%s%s%s?basic_stats=true' % (self.baseUrl, 'pools/default/buckets/', bucket)
-        if isinstance(bucket, Bucket):
-            api = '%s%s%s?basic_stats=true' % (self.baseUrl, 'pools/default/buckets/', bucket.name)
-        status, content, header = self._http_request(api)
-        num = 1
-        while not status and num_attempt > num:
-            log.error("try to get {0} again after {1} sec".format(api, timeout))
-            time.sleep(timeout)
-            status, content, header = self._http_request(api)
-            num += 1
-        if status:
-            bucketInfo = RestParser().parse_get_bucket_response(content)
-        return bucketInfo
-
-    def get_vbuckets(self, bucket='default'):
-        b = self.get_bucket(bucket)
-        return None if not b else b.vbuckets
 
     def delete_bucket(self, bucket='default'):
         api = '%s%s%s' % (self.baseUrl, 'pools/default/buckets/', bucket)
@@ -265,10 +244,10 @@ class BucketHelper(RestConnection):
 
         api = '{0}{1}'.format(self.baseUrl, 'pools/default/buckets')
         init_params = {'name': bucket_params.get('name'),
-                       'ramQuotaMB': bucket_params.get('size'),
-                       'replicaNumber': bucket_params.get('replicas'),
-                       'bucketType': bucket_params.get('type'),
-                       'replicaIndex': bucket_params.get('enable_replica_index'),
+                       'ramQuotaMB': bucket_params.get('ramQuotaMB'),
+                       'replicaNumber': bucket_params.get('replicaNumber'),
+                       'bucketType': bucket_params.get('bucketType'),
+                       'replicaIndex': bucket_params.get('replicaIndex'),
                        'threadsNumber': bucket_params.get('threadsNumber'),
                        'flushEnabled': bucket_params.get('flushEnabled'),
                        'evictionPolicy': bucket_params.get('evictionPolicy'),
