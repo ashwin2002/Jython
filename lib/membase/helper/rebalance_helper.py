@@ -1,7 +1,7 @@
 from random import shuffle
 import time
 import logger
-from couchbase_helper.cluster import Cluster
+from couchbase_helper.cluster import ServerTasks
 from membase.api.exception import StatsUnavailableException, \
     ServerAlreadyJoinedException, RebalanceFailedException, \
     FailoverFailedException, InvalidArgumentException, ServerSelfJoinException, \
@@ -77,7 +77,7 @@ class RebalanceHelper():
     @staticmethod
     def wait_for_replication(servers, cluster_helper=None, timeout=600):
         if cluster_helper is None:
-            cluster = Cluster()
+            cluster = ServerTasks()
         else:
             cluster = cluster_helper
         tasks = []

@@ -6,7 +6,7 @@ import logging
 import commands
 import json
 import traceback
-from couchbase_helper.cluster import Cluster
+from couchbase_helper.cluster import ServerTasks
 from TestInput import TestInputSingleton
 from membase.api.rest_client import RestHelper
 from membase.helper.cluster_helper import ClusterOperationHelper
@@ -25,7 +25,7 @@ from BucketLib.BucketOperations import BucketHelper
 
 log = logging.getLogger()
 
-class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils, views_utils):
+class BaseTestCase(unittest.TestCase, failover_utils, node_utils, views_utils):
     def setUp(self):
         self.failover_util = failover_utils()
         self.node_util = node_utils()
@@ -35,7 +35,6 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
         self.input = TestInputSingleton.input
         self.primary_index_created = False
         self.use_sdk_client = self.input.param("use_sdk_client", False)
-        self.analytics = self.input.param("analytics", False)
         if self.input.param("log_level", None):
             log.setLevel(level=0)
             for hd in log.handlers:
@@ -49,22 +48,17 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
             self.servers = [server for server in self.servers
                             if server.ip != self.moxi_server.ip]
         self.buckets = []
-#         self.bucket_base_params = {}
-#         self.bucket_base_params['membase'] = {}
-        self.master = self.servers[0]
-        self.cluster_details = CBCluster(servers=self.input.servers)
-        self.bucket_util = bucket_utils(self.master)
-        self.cluster_util = cluster_utils(self.master)
-        self.indexManager = self.servers[0]
-        if not hasattr(self, 'cluster'):
-            self.cluster = Cluster()
+        self.cluster = CBCluster(servers=self.input.servers)
+        self.bucket_util = bucket_utils(self.cluster)
+        self.cluster_util = cluster_utils(self.cluster)
+        self.task = ServerTasks()
         self.pre_warmup_stats = {}
         self.cleanup = False
         self.nonroot = False
-        shell = RemoteMachineShellConnection(self.master)
+        shell = RemoteMachineShellConnection(self.cluster.master)
         self.os_info = shell.extract_remote_info().type.lower()
         if self.os_info != 'windows':
-            if self.master.ssh_username != "root":
+            if self.cluster.master.ssh_username != "root":
                 self.nonroot = True
         shell.disconnect()
         """ some tests need to bypass checking cb server at set up
@@ -77,8 +71,6 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
 
         try:
             self.skip_setup_cleanup = self.input.param("skip_setup_cleanup", False)
-            self.vbuckets = self.input.param("vbuckets", 1024)
-            self.upr = self.input.param("upr", None)
             self.index_quota_percent = self.input.param("index_quota_percent", None)
             self.targetIndexManager = self.input.param("targetIndexManager", False)
             self.targetMaster = self.input.param("targetMaster", False)
@@ -91,7 +83,7 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
             self.parallelism = self.input.param("parallelism", False)
             self.verify_unacked_bytes = self.input.param("verify_unacked_bytes", False)
             self.enable_flow_control = self.input.param("enable_flow_control", False)
-            self.num_servers = self.input.param("servers", len(self.servers))
+            self.num_servers = self.input.param("servers", len(self.cluster.servers))
             # initial number of items in the cluster
             self.nodes_init = self.input.param("nodes_init", 1)
             self.nodes_in = self.input.param("nodes_in", 1)
@@ -137,20 +129,20 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
                 return
             if not self.skip_init_check_cbserver:
                 self.cb_version = None
-                if RestHelper(RestConnection(self.master)).is_ns_server_running():
+                if RestHelper(RestConnection(self.cluster.master)).is_ns_server_running():
                     """ since every new couchbase version, there will be new features
                         that test code will not work on previous release.  So we need
                         to get couchbase version to filter out those tests. """
-                    self.cb_version = RestConnection(self.master).get_nodes_version()
+                    self.cb_version = RestConnection(self.cluster.master).get_nodes_version()
                 else:
                     log.info("couchbase server does not run yet")
-                self.protocol = self.get_protocol_type()
+                self.protocol = self.cluster_util.get_protocol_type()
             self.services_map = None
 
             log.info("==============  basetestcase setup was started for test #{0} {1}==============" \
                           .format(self.case_number, self._testMethodName))
             if not self.skip_buckets_handle and not self.skip_init_check_cbserver:
-                self._cluster_cleanup()
+                self.cluster_util._cluster_cleanup(self.bucket_util)
 
             # avoid any cluster operations in setup for new upgrade
             #  & upgradeXDCR tests
@@ -172,17 +164,17 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
                 self.cleanup = True
                 if not self.skip_init_check_cbserver:
                     self.tearDownEverything()
-                self.cluster = Cluster()
+                self.task = ServerTasks()
             if not self.skip_init_check_cbserver:
                 log.info("initializing cluster")
-                self.reset_cluster()
-                master_services = self.get_services(self.servers[:1], \
+                self.cluster_util.reset_cluster(self.targetMaster, self.reset_services)
+                master_services = self.cluster_util.get_services(self.servers[:1], \
                                                     self.services_init, \
                                                     start_node=0)
                 if master_services != None:
                     master_services = master_services[0].split(",")
 
-                self.quota = self._initialize_nodes(self.cluster, self.servers, \
+                self.quota = self._initialize_nodes(self.task, self.cluster.servers, \
                                                     self.disabled_consistent_view, \
                                                     self.rebalanceIndexWaitingDisabled, \
                                                     self.rebalanceIndexPausingDisabled, \
@@ -192,12 +184,12 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
                                                     self.quota_percent, \
                                                     services=master_services)
 
-                self.change_env_variables()
-                self.change_checkpoint_params()
+                self.cluster_util.change_env_variables()
+                self.cluster_util.change_checkpoint_params()
 
                 # Add built-in user
                 if not self.skip_init_check_cbserver:
-                    self.add_built_in_server_user(node=self.master)
+                    self.add_built_in_server_user(node=self.cluster.master)
                 log.info("done initializing cluster")
             else:
                 self.quota = ""
@@ -222,19 +214,19 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
 
                     self.services = self.get_services(self.servers, self.services_init)
                     # rebalance all nodes into the cluster before each test
-                    self.cluster.rebalance(self.servers[:self.num_servers], self.servers[1:self.num_servers], [],
+                    self.task.rebalance(self.servers[:self.num_servers], self.servers[1:self.num_servers], [],
                                            services=self.services)
                 elif self.nodes_init > 1 and not self.skip_init_check_cbserver:
                     self.services = self.get_services(self.servers[:self.nodes_init], self.services_init)
-                    self.cluster.rebalance(self.servers[:1], \
+                    self.task.rebalance(self.servers[:1], \
                                            self.servers[1:self.nodes_init], \
                                            [], services=self.services)
                 elif str(self.__class__).find('ViewQueryTests') != -1 and \
                         not self.input.param("skip_rebalance", False):
                     self.services = self.get_services(self.servers, self.services_init)
-                    self.cluster.rebalance(self.servers, self.servers[1:],
+                    self.task.rebalance(self.servers, self.servers[1:],
                                            [], services=self.services)
-                self.setDebugLevel(service_type="index")
+                self.cluster_util.setDebugLevel(service_type="index")
             except BaseException, e:
                 # increase case_number to retry tearDown in setup for the next test
                 self.case_number += 1000
@@ -248,7 +240,7 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
                 self.sleep(10)
         except Exception, e:
             traceback.print_exc()
-            self.cluster.shutdown(force=True)
+            self.task.shutdown(force=True)
             self.fail(e)
 
     def get_cbcollect_info(self, server):
@@ -308,7 +300,7 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
 
                 log.info("==============  basetestcase cleanup was started for test #{0} {1} ==============" \
                               .format(self.case_number, self._testMethodName))
-                rest = RestConnection(self.master)
+                rest = RestConnection(self.cluster.master)
                 alerts = rest.get_alerts()
                 if self.force_kill_memcached:
                     self.kill_memcached()
@@ -322,24 +314,24 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
                     stopped = rest.stop_rebalance()
                     self.assertTrue(stopped, msg="unable to stop rebalance")
                 self.bucket_util.delete_all_buckets(self.servers)
-                ClusterOperationHelper.cleanup_cluster(self.servers, master=self.master)
+                ClusterOperationHelper.cleanup_cluster(self.servers, master=self.cluster.master)
                 ClusterOperationHelper.wait_for_ns_servers_or_assert(self.servers, self)
                 log.info("==============  basetestcase cleanup was finished for test #{0} {1} ==============" \
                               .format(self.case_number, self._testMethodName))
         except BaseException:
             # kill memcached
-            self.kill_memcached()
+            self.cluster_util.kill_memcached()
             # increase case_number to retry tearDown in setup for the next test
             self.case_number += 1000
         finally:
             if not self.input.param("skip_cleanup", False):
-                self.reset_cluster()
+                self.cluster_util.reset_cluster(self.targetMaster, self.reset_services)
             # stop all existing task manager threads
             if self.cleanup:
                 self.cleanup = False
             else:
-                self.reset_env_variables()
-            self.cluster.shutdown(force=True)
+                self.cluster_util.reset_env_variables()
+            self.task.shutdown(force=True)
             self._log_finish(self)
 
     def get_index_map(self):
@@ -365,19 +357,6 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
         log.info("sleep for {0} secs. {1} ...".format(timeout, message))
         time.sleep(timeout)
 
-    def _cluster_cleanup(self):
-        rest = RestConnection(self.master)
-        alerts = rest.get_alerts()
-        if rest._rebalance_progress_status() == 'running':
-            self.kill_memcached()
-            log.warning("rebalancing is still running, test should be verified")
-            stopped = rest.stop_rebalance()
-            self.assertTrue(stopped, msg="unable to stop rebalance")
-        self.bucket_util.delete_all_buckets(self.servers)
-        ClusterOperationHelper.cleanup_cluster(self.servers, master=self.master)
-#         self.sleep(10)
-        ClusterOperationHelper.wait_for_ns_servers_or_assert(self.servers, self)
-
     def _initialize_nodes(self, cluster, servers, disabled_consistent_view=None, rebalanceIndexWaitingDisabled=None,
                           rebalanceIndexPausingDisabled=None, maxParallelIndexers=None, maxParallelReplicaIndexers=None,
                           port=None, quota_percent=None, services=None):
@@ -386,7 +365,7 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
         for server in servers:
             init_port = port or server.port or '8091'
             assigned_services = services
-            if self.master != server:
+            if self.cluster.master != server:
                 assigned_services = None
             init_tasks.append(cluster.async_init_node(server, disabled_consistent_view, rebalanceIndexWaitingDisabled,
                                                       rebalanceIndexPausingDisabled, maxParallelIndexers,
@@ -482,7 +461,7 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
         if expected_rows is None:
             expected_rows = self.num_items
         for i in xrange(num_views):
-            tasks.append(self.cluster.async_query_view(server, prefix + ddoc_name,
+            tasks.append(self.task.async_query_view(server, prefix + ddoc_name,
                                                        self.default_view_name + str(i), query,
                                                        expected_rows, bucket, retry_time))
         try:
@@ -727,7 +706,7 @@ class BaseTestCase(unittest.TestCase, cluster_utils, failover_utils, node_utils,
                 items += (gen_load.end - gen_load.start)
         for bucket in buckets:
             log.info("%s %s to %s documents..." % (op_type, items, bucket.name))
-            tasks.append(self.cluster.async_load_gen_docs(self.master, bucket.name,
+            tasks.append(self.task.async_load_gen_docs(self.master, bucket.name,
                                                           gens_load[bucket],
                                                           bucket.kvs[kv_store], op_type, exp, flag,
                                                           only_store_hash, batch_size, pause_secs,

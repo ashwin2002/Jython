@@ -6,7 +6,7 @@ from multiprocessing.dummy import Pool
 
 from couchbase.bucket import Bucket, LOCKMODE_WAIT, CouchbaseError, \
     ArgumentError, NotFoundError, TimeoutError
-from couchbase.cluster import Cluster, PasswordAuthenticator
+from couchbase.cluster import ServerTasks, PasswordAuthenticator
 from decorator import decorator
 
 description = """
@@ -179,7 +179,7 @@ class DocumentGenerator:
         """
         for i in range(0, self.threads):
             if self.cb_version > '5':
-                cluster = Cluster(self.spec)
+                cluster = ServerTasks(self.spec)
                 auth = PasswordAuthenticator(self.user, self.password)
                 cluster.authenticate(auth)
                 bucket = cluster.open_bucket(self.bucket_name, lockmode=LOCKMODE_WAIT)

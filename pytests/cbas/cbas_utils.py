@@ -9,9 +9,8 @@ import logger
 from remote.remote_util import RemoteMachineShellConnection
 from threading import Thread
 import threading
-# from bucket_utils.bucket_ready_functions import bucket_utils
 import time
-from couchbase_helper.cluster import Cluster
+from couchbase_helper.cluster import ServerTasks
 log = logger.Logger.get_logger()
 
 class cbas_utils():
@@ -20,7 +19,7 @@ class cbas_utils():
         self.cbas_node = cbas_node
         self.master = master
         self.cbas_helper = CBASHelper(master, cbas_node)
-        self.cluster = Cluster() 
+        self.cluster = ServerTasks() 
 #         self.bucket_util = bucket_utils(master)
 
     def createConn(self, bucket, username=None, password=None):
@@ -28,10 +27,6 @@ class cbas_utils():
     
     def closeConn(self):
         self.cbas_helper.closeConn()
-    
-#     def create_default_bucket(self):
-#         self.bucket_util.create_default_bucket()
-#         self.createConn("default")
     
     def execute_statement_on_cbas_util(self, statement, mode=None, rest=None, timeout=120, client_context_id=None, username=None, password=None, analytics_timeout=120, time_out_unit="s"):
         """

@@ -13,7 +13,7 @@ API provides a way to run task do syncronously and asynchronously.
 
 log = logging.getLogger(__name__)
 
-class Cluster(object):
+class ServerTasks(object):
     """A Task API for performing various operations synchronously or asynchronously on Couchbase cluster."""
 
     def __init__(self):

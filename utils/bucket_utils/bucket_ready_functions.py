@@ -33,7 +33,7 @@ from remote.remote_util import RemoteMachineShellConnection
 from testconstants import MAX_COMPACTION_THRESHOLD
 from testconstants import MIN_COMPACTION_THRESHOLD
 from lib.memcached.helper.kvstore import KVStore
-from lib.couchbase_helper.cluster import Cluster
+from lib.couchbase_helper.cluster import ServerTasks
 from cluster_utils.cluster_ready_functions import CBCluster as cluster
 log = logger.Logger.get_logger()
 
@@ -86,7 +86,7 @@ class Bucket(object):
 
     class vBucket():
         def __init__(self):
-            cluster.master = ''
+            self.master = ''
             self.replica = []
             self.id = -1
     
@@ -124,20 +124,17 @@ class Bucket(object):
     
 class bucket_utils():
     
-    def __init__(self, server):
-        cluster.master = server
-        cluster.master = server
-        self.task = Cluster()
-        self.rest = RestConnection(server)
+    def __init__(self, cluster):
+        self.cluster = cluster
+        self.task = ServerTasks()
         self.buckets = []
-        self.bucket_helper = BucketHelper(server)
         self.input = TestInputSingleton.input
         self.enable_time_sync = self.input.param("enable_time_sync", False)
     
     def create_bucket(self, bucket):
         if not isinstance(bucket, Bucket):
             raise
-        self.task.sync_create_bucket(cluster.master, bucket)
+        self.task.sync_create_bucket(self.cluster.master, bucket)
         self.buckets.append(bucket)
         
     def delete_bucket(self, serverInfo, bucket='default', wait_for_bucket_deletion=True):
@@ -229,13 +226,13 @@ class bucket_utils():
                     self.fail(msg)        
         
     def create_default_bucket(self):
-        node_info = self.rest.get_nodes_self()
+        node_info = RestConnection(self.cluster.master).get_nodes_self()
         if node_info.memoryQuota and int(node_info.memoryQuota) > 0 :
             ram_available = node_info.memoryQuota
             
         ramQuotaMB = ram_available - 1
         default_bucket = Bucket({Bucket.ramQuotaMB:ramQuotaMB})
-        self.task.sync_create_bucket(cluster.master, default_bucket)
+        self.task.sync_create_bucket(self.cluster.master, default_bucket)
         self.buckets.append(default_bucket)
         
         if self.enable_time_sync:
@@ -243,10 +240,11 @@ class bucket_utils():
     
     def get_bucket_object_from_name(self, bucket="", num_attempt=1, timeout=1):
         bucketInfo = None
+        bucket_helper = BucketHelper(self.cluster.master)
         num = 0
         while num_attempt > num:
             try:
-                content = self.bucket_helper.get_bucket_json(bucket)
+                content = bucket_helper.get_bucket_json(bucket)
                 bucketInfo = self.parse_get_bucket_response(content)
                 break;
             except:
@@ -255,8 +253,8 @@ class bucket_utils():
         return bucketInfo
 
     def get_vbuckets(self, bucket='default'):
-        b = self.get_bucket(bucket)
-        return None if not b else b.vbuckets    
+        b = self.get_bucket_object_from_name(bucket)
+        return None if not b else b.vbuckets
     
     def is_lww_enabled(self, bucket='default'):
         bucket_info = self.get_bucket_json(bucket=bucket)
@@ -268,12 +266,12 @@ class bucket_utils():
         
     def change_max_buckets(self, total_buckets):
         command = "curl -X POST -u {0}:{1} -d maxBucketCount={2} http://{3}:{4}/internalSettings".format \
-            (cluster.master.rest_username,
-             cluster.master.rest_password,
+            (self.cluster.master.rest_username,
+             self.cluster.master.rest_password,
              total_buckets,
-             cluster.master.ip,
-             cluster.master.port)
-        shell = RemoteMachineShellConnection(cluster.master)
+             self.cluster.master.ip,
+             self.cluster.master.port)
+        shell = RemoteMachineShellConnection(self.cluster.master)
         output, error = shell.execute_command_raw(command)
         shell.log_command_output(output, error)
         shell.disconnect()
@@ -295,7 +293,7 @@ class bucket_utils():
             #client.sasl_auth_plain(memcache_credentials[s.ip]['id'], memcache_credentials[s.ip]['password'])
 
         for b in buckets:
-            client1 = VBucketAwareMemcached( RestConnection(cluster.master), b)
+            client1 = VBucketAwareMemcached( RestConnection(self.cluster.master), b)
 
             for j in range(self.vbuckets):
                 #print 'doing vbucket', j
@@ -406,7 +404,7 @@ class bucket_utils():
     def _all_buckets_flush(self):
         flush_tasks = []
         for bucket in self.buckets:
-            flush_tasks.append(self.task.async_bucket_flush(cluster.master, bucket.name))
+            flush_tasks.append(self.task.async_bucket_flush(self.cluster.master, bucket.name))
 
         for task in flush_tasks:
             task.result()
@@ -418,7 +416,7 @@ class bucket_utils():
     def _verify_stats_all_buckets(self, servers, master=None, timeout=60):
         stats_tasks = []
         if not master:
-            master = cluster.master
+            master = self.cluster.master
         servers = self.get_kv_nodes(servers, master)
         for bucket in self.buckets:
             items = sum([len(kv_store) for kv_store in bucket.kvs.values()])
@@ -453,7 +451,7 @@ class bucket_utils():
             for task in stats_tasks:
                 task.cancel()
             self.log.error("unable to get expected stats for any node! Print taps for all nodes:")
-            rest = RestConnection(cluster.master)
+            rest = RestConnection(self.cluster.master)
             for bucket in self.buckets:
                 RebalanceHelper.print_taps_from_all_nodes(rest, bucket)
             raise Exception("unable to get expected stats during {0} sec".format(timeout))
@@ -507,7 +505,7 @@ class bucket_utils():
         """
         if self.enable_bloom_filter:
             for bucket in self.buckets:
-                ClusterOperationHelper.flushctl_set(cluster.master,
+                ClusterOperationHelper.flushctl_set(self.cluster.master,
                                                     "bfilter_enabled", 'true', bucket)
         self.log.info("BATCH SIZE for documents load: %s" % batch_size)
         tasks = self._async_load_all_buckets(server, kv_gen, op_type, exp, kv_store, flag,
@@ -527,7 +525,7 @@ class bucket_utils():
                 threshold_reached = False
                 while not threshold_reached:
                     active_resident = \
-                        stats_all_buckets[bucket.name].get_stats([cluster.master], bucket, '',
+                        stats_all_buckets[bucket.name].get_stats([self.cluster.master], bucket, '',
                                                      'vb_active_perc_mem_resident')[server]
                     if int(active_resident) > self.active_resident_threshold:
                         self.log.info(
@@ -535,14 +533,14 @@ class bucket_utils():
                             " Continue loading to the cluster" %
                                                (active_resident,
                                                 self.active_resident_threshold,
-                                                cluster.master.ip,
+                                                self.cluster.master.ip,
                                                 bucket.name))
                         random_key = self.key_generator()
                         generate_load = BlobGenerator(random_key,
                                                       '%s-' % random_key,
                                                       self.value_size,
                                                       end=batch_size * 50)
-                        self._load_bucket(bucket, cluster.master, generate_load,
+                        self._load_bucket(bucket, self.cluster.master, generate_load,
                                           "create", exp=0, kv_store=1, flag=0,
                                           only_store_hash=True,
                                           batch_size=batch_size,
@@ -551,7 +549,7 @@ class bucket_utils():
                         threshold_reached = True
                         self.log.info("\n DGM state achieved at %s %% for %s in bucket %s!"\
                                                                      % (active_resident,
-                                                                        cluster.master.ip,
+                                                                        self.cluster.master.ip,
                                                                         bucket.name))
                         break
 
@@ -585,15 +583,15 @@ class bucket_utils():
             memory_is_full = False
             while not memory_is_full:
                 memory_used = \
-                    stats_all_buckets[bucket.name].get_stats([cluster.master], bucket, '',
+                    stats_all_buckets[bucket.name].get_stats([self.cluster.master], bucket, '',
                                                              'mem_used')[ server]
                 # memory is considered full if mem_used is at say 90% of the available memory
                 if int(memory_used) < percentage * self.bucket_size * 1000000:
                     self.log.info(
                         "Still have memory. %s used is less than %s MB quota for %s in bucket %s. Continue loading to the cluster" %
-                        (memory_used, self.bucket_size , cluster.master.ip, bucket.name))
+                        (memory_used, self.bucket_size , self.cluster.master.ip, bucket.name))
 
-                    self._load_bucket(bucket, cluster.master, kv_gen, "create", exp=0, kv_store=1, flag=0,
+                    self._load_bucket(bucket, self.cluster.master, kv_gen, "create", exp=0, kv_store=1, flag=0,
                     only_store_hash=True, batch_size=batch_size, pause_secs=5, timeout_secs=60)
                     kv_gen.start = kv_gen.start + increment
                     kv_gen.end = kv_gen.end + increment
@@ -601,7 +599,7 @@ class bucket_utils():
                 else:
                     memory_is_full = True
                     self.log.info("Memory is full, %s bytes in use for %s and bucket %s!" %
-                                  (memory_used, cluster.master.ip, bucket.name))
+                                  (memory_used, self.cluster.master.ip, bucket.name))
 
     def key_generator(self, size=6, chars=string.ascii_uppercase + string.digits):
         return ''.join(random.choice(chars) for x in range(size))
@@ -700,7 +698,7 @@ class bucket_utils():
             gen_load = DocumentGenerator('test_docs', template, age, first, start=0, end=self.num_items)
 
         self.log.info("%s %s documents..." % (data_op, self.num_items))
-        self._load_all_buckets(cluster.master, gen_load, data_op, 0, batch_size=batch_size)
+        self._load_all_buckets(self.cluster.master, gen_load, data_op, 0, batch_size=batch_size)
         return gen_load
     
     def get_vbucket_seqnos(self, servers, buckets, skip_consistency=False, per_node=True):
@@ -852,7 +850,7 @@ class bucket_utils():
                                 "total vbuckets do not match for active data set  (<= criteria), actual {0} expectecd {1}".format(
                                     active_result["total"], total_vbuckets))
             if type == "rebalance":
-                rest = RestConnection(cluster.master)
+                rest = RestConnection(self.cluster.master)
                 nodes = rest.node_statuses()
                 if (len(nodes) - self.num_replicas) >= 1:
                     self.assertTrue(replica_result["total"] == self.num_replicas * total_vbuckets,
@@ -985,12 +983,12 @@ class bucket_utils():
                 self.load(docs_gen_map[key], op_type=op_type, exp=self.expiry, verify_data=verify_data,
                           batch_size=batch_size)
         if "expiry" in docs_gen_map.keys():
-            self._expiry_pager(cluster.master)
+            self._expiry_pager(self.cluster.master)
 
     def async_ops_all_buckets(self, docs_gen_map={}, batch_size=10):
         tasks = []
         if "expiry" in docs_gen_map.keys():
-            self._expiry_pager(cluster.master)
+            self._expiry_pager(self.cluster.master)
         for key in docs_gen_map.keys():
             if key != "remaining":
                 op_type = key
@@ -1008,12 +1006,12 @@ class bucket_utils():
         try:
             for x in range(1, number_of_times):
                 for bucket in self.buckets:
-                    BucketHelper(cluster.master).compact_bucket(bucket.name)
+                    BucketHelper(self.cluster.master).compact_bucket(bucket.name)
         except Exception, ex:
             self.log.info(ex)
             
     def _load_data_in_buckets_using_mc_bin_client(self, bucket, data_set, max_expiry_range=None):
-        client = VBucketAwareMemcached(RestConnection(cluster.master), bucket)
+        client = VBucketAwareMemcached(RestConnection(self.cluster.master), bucket)
         try:
             for key in data_set.keys():
                 expiry = 0
@@ -1104,7 +1102,7 @@ class bucket_utils():
     
     def load_sample_buckets(self, servers=None, bucketName=None, total_items=None):
         """ Load the specified sample bucket in Couchbase """
-        self.assertTrue(BucketHelper(cluster.master).load_sample(bucketName),"Failure while loading sample bucket: %s"%bucketName)
+        self.assertTrue(BucketHelper(self.cluster.master).load_sample(bucketName),"Failure while loading sample bucket: %s"%bucketName)
         
         """ check for load data into travel-sample bucket """
         if total_items:
@@ -1113,7 +1111,7 @@ class bucket_utils():
                 self.sleep(10)
                 num_actual = 0
                 if not servers:
-                    num_actual = self.get_item_count(cluster.master,bucketName)
+                    num_actual = self.get_item_count(self.cluster.master,bucketName)
                 else:
                     for server in servers:
                         if "kv" in server.services:
@@ -1320,10 +1318,10 @@ class bucket_utils():
         try:
             if not _async:
                 self.log.info("BATCH SIZE for documents load: %s" % batch_size)
-                self._load_all_buckets(cluster.master, gen_load, operation, exp, batch_size=batch_size)
+                self._load_all_buckets(self.cluster.master, gen_load, operation, exp, batch_size=batch_size)
                 self._verify_stats_all_buckets(self.input.servers)
             else:
-                tasks = self._async_load_all_buckets(cluster.master, gen_load, operation, exp, batch_size=batch_size)
+                tasks = self._async_load_all_buckets(self.cluster.master, gen_load, operation, exp, batch_size=batch_size)
                 return tasks
         except Exception as e:
             self.log.info(e.message)
@@ -1333,7 +1331,7 @@ class bucket_utils():
         Calculates the Memory that can be allocated for KV service on a node
         :return: Memory that can be used for KV service.
         """
-        info = self.rest.get_nodes_self()
+        info = RestConnection(self.cluster.master).get_nodes_self()
         free_memory_in_mb = info.memoryFree // 1024 ** 2
         total_available_memory_in_mb = 0.8 * free_memory_in_mb
         

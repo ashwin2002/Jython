@@ -25,7 +25,7 @@ class CBASBaseTest(BaseTestCase):
         self.cbas_servers = []
         self.kv_servers = []
  
-        for server in self.servers:
+        for server in self.cluster.servers:
             if "cbas" in server.services:
                 self.cbas_servers.append(server)
             if "kv" in server.services:
@@ -44,7 +44,7 @@ class CBASBaseTest(BaseTestCase):
         self.expected_error = self.input.param("error", None)
         if self.expected_error:
             self.expected_error = self.expected_error.replace("INVALID_IP",invalid_ip)
-            self.expected_error = self.expected_error.replace("PORT",self.master.port)
+            self.expected_error = self.expected_error.replace("PORT",self.cluster.master.port)
         self.cb_server_ip = self.input.param("cb_server_ip", None)
         self.cb_server_ip = self.cb_server_ip.replace('INVALID_IP',invalid_ip) if self.cb_server_ip is not None else None
         self.cbas_dataset_name = self.input.param("cbas_dataset_name", 'travel_ds')
@@ -70,7 +70,7 @@ class CBASBaseTest(BaseTestCase):
         self.otpNodes = []
         self.cbas_path = server.cbas_path
 
-        self.rest = RestConnection(self.master)
+        self.rest = RestConnection(self.cluster.master)
         self.log.info("Setting the min possible memory quota so that adding more nodes to the cluster wouldn't be a problem.")
         self.rest.set_service_memoryQuota(service='memoryQuota', memoryQuota=MIN_KV_QUOTA)
         self.rest.set_service_memoryQuota(service='ftsMemoryQuota', memoryQuota=FTS_QUOTA)
@@ -90,17 +90,17 @@ class CBASBaseTest(BaseTestCase):
         self.cbas_util = None
         # Drop any existing buckets and datasets
         if self.cbas_node:
-            self.cbas_util = cbas_utils(self.master, self.cbas_node)
+            self.cbas_util = cbas_utils(self.cluster.master, self.cbas_node)
             self.cleanup_cbas()
                     
         if not self.cbas_node and len(self.cbas_servers)>=1:
             self.cbas_node = self.cbas_servers[0]
-            self.cbas_util = cbas_utils(self.master, self.cbas_node)
-            if "cbas" in self.master.services:
+            self.cbas_util = cbas_utils(self.cluster.master, self.cbas_node)
+            if "cbas" in self.cluster.master.services:
                 self.cleanup_cbas()
             if add_defualt_cbas_node:
-                if self.master.ip != self.cbas_node.ip:
-                    self.otpNodes.append(cluster_utils(self.master).add_node(self.cbas_node))
+                if self.cluster.master.ip != self.cbas_node.ip:
+                    self.otpNodes.append(self.cluster_util.add_node(self.cbas_node))
                 else:
                     self.otpNodes = self.rest.node_statuses()
                 ''' This cbas cleanup is actually not needed.

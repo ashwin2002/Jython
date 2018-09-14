@@ -8,7 +8,9 @@ import copy
 from couchbase_cli import CouchbaseCLI
 from membase.api.rest_client import RestConnection, RestHelper
 from remote.remote_util import RemoteMachineShellConnection
+from membase.helper.cluster_helper import ClusterOperationHelper
 from ClusterLib.ClusterOperations import ClusterHelper
+from TestInput import TestInputSingleton
 import logger
 import time
 
@@ -30,10 +32,27 @@ class CBCluster:
         self.master = master
         
 class cluster_utils():
-    def __init__(self, server):
-        self.master = server
-        self.rest = RestConnection(server)
+    def __init__(self, cluster):
+        self.input = TestInputSingleton.input
+        self.cluster = cluster
+        self.master = cluster.master
+        self.rest = RestConnection(cluster.master)
+        self.vbuckets = self.input.param("vbuckets", 1024)
+        self.upr = self.input.param("upr", None)
         self.log = logger.Logger.get_logger()
+    
+    def _cluster_cleanup(self, bucket_util):
+        rest = RestConnection(self.master)
+        alerts = rest.get_alerts()
+        if rest._rebalance_progress_status() == 'running':
+            self.kill_memcached()
+            log.warning("rebalancing is still running, test should be verified")
+            stopped = rest.stop_rebalance()
+            self.assertTrue(stopped, msg="unable to stop rebalance")
+            bucket_util.delete_all_buckets(self.servers)
+        ClusterOperationHelper.cleanup_cluster(self.cluster.servers, master=self.cluster.master)
+#         self.sleep(10)
+        ClusterOperationHelper.wait_for_ns_servers_or_assert(self.cluster.servers, self)
         
     def get_nodes_in_cluster(self, master_node=None):
         rest = None
@@ -102,7 +121,7 @@ class cluster_utils():
 
     def change_env_variables(self):
         if self.vbuckets != 1024 or self.upr != None:
-            for server in self.servers:
+            for server in self.cluster.servers:
                 dict = {}
                 if self.vbuckets:
                     dict["COUCHBASE_NUM_VBUCKETS"] = self.vbuckets
@@ -186,7 +205,7 @@ class cluster_utils():
             remote_client.disconnect()
 
     def kill_memcached(self):
-        for server in self.servers:
+        for server in self.cluster.servers:
             remote_client = RemoteMachineShellConnection(server)
             remote_client.kill_memcached()
             remote_client.disconnect()
@@ -225,10 +244,10 @@ class cluster_utils():
                 shell.disconnect()
                 break
             
-    def reset_cluster(self):
-        if self.targetMaster or self.reset_services:
+    def reset_cluster(self, targetMaster, reset_services):
+        if targetMaster or reset_services:
             try:
-                for node in self.servers:
+                for node in self.cluster.servers:
                     shell = RemoteMachineShellConnection(node)
                     # Start node
                     rest = RestConnection(node)
@@ -244,9 +263,9 @@ class cluster_utils():
 
     def get_nodes_from_services_map(self, service_type="n1ql", get_all_nodes=False, servers=None, master=None):
         if not servers:
-            servers = self.servers
+            servers = self.cluster.servers
         if not master:
-            master = self.master
+            master = self.cluster.master
         self.get_services_map(master=master)
         if (service_type not in self.services_map):
             self.log.info("cannot find service node {0} in cluster " \
